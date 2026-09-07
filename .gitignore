@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv_test/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Env / secrets
+.env
+.env.local
+
+# Local dev database (SQLite) — contains real encrypted camera credentials
+# and real alert/incident records once the app has actually run
+*.db
+*.db-journal
+
+# Models (large binaries — document how to obtain them instead of committing)
+models/*.pt
+models/*.onnx
+models/*.engine
+
+# Runtime data
+storage/clips/*
+storage/snapshots/*
+!storage/clips/.gitkeep
+!storage/snapshots/.gitkeep
+
+# Misc
+.DS_Store
+*.log
