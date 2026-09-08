@@ -30,6 +30,12 @@ storage/snapshots/*
 !storage/clips/.gitkeep
 !storage/snapshots/.gitkeep
 
+# Training data for a custom AGE_MODEL — real photos of real children and
+# staff extracted from actual classroom footage. Must never be committed.
+# (scripts/extract_crops.py runs from backend/ but writes one level up via
+# ../training_data, so this lands at the repo root, not backend/.)
+/training_data/
+
 # Misc
 .DS_Store
 *.log

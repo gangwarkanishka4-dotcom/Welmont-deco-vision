@@ -1,7 +1,13 @@
-"""Draws the debug/snapshot overlay: bounding boxes, adult/child labels with
-smoothed confidence, ROI polygon, and a status banner. Shared by the
+"""Draws the debug/snapshot overlay: bounding boxes (adults only — see below)
+with smoothed confidence, ROI polygon, and a status banner. Shared by the
 live-view MJPEG/WS stream, the debug overlay, and alert snapshots — no facial
-identity information is ever drawn, only track_id + age-group label (spec §12/§26)."""
+identity information is ever drawn, only track_id + age-group label (spec §12/§26).
+
+Only ADULT-labeled people get a drawn box (2026-09-08): children are still
+fully detected, classified, and counted upstream in the pipeline exactly as
+before — this function is purely the visual render and has no bearing on
+adult_count/child_count or supervision state. It just never draws a box or
+label on a child in the rendered image."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -35,6 +41,15 @@ def draw_overlay(
         cv2.polylines(canvas, [pts], isClosed=True, color=(255, 255, 255), thickness=2)
 
     for person in people:
+        # Only adults get a drawn box — children's boxes/labels are never
+        # rendered here, even though classification and counting for them
+        # still run exactly as before (this function is purely visual; it
+        # has no bearing on adult_count/child_count or supervision state,
+        # which are all computed upstream in the pipeline before this is
+        # ever called). Per request 2026-09-08: no visual boxes on children.
+        if person["label"] != "ADULT":
+            continue
+
         x1, y1, x2, y2 = (int(v) for v in person["box"])
         color = LABEL_COLORS.get(person["label"], (200, 200, 200))
         thickness = 2 if person.get("in_roi", True) else 1
