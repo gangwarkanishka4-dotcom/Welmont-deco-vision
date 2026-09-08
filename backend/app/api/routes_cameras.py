@@ -90,7 +90,7 @@ async def update_camera(camera_id: str, payload: CameraUpdate, request: Request,
     return camera
 
 
-@router.delete("/{camera_id}", status_code=204)
+@router.delete("/{camera_id}", status_code=204, response_model=None)
 async def delete_camera(camera_id: str, request: Request, db: AsyncSession = Depends(get_db)) -> None:
     camera = await db.get(Camera, camera_id)
     if camera is None:
