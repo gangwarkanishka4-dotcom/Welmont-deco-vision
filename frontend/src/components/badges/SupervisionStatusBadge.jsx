@@ -12,7 +12,7 @@ const CONFIG = {
     className: 'bg-status-unsupervised/15 text-status-unsupervised border-status-unsupervised/30',
     pulse: true,
   },
-  EMPTY: { label: 'Empty', className: 'bg-status-empty/15 text-status-empty border-status-empty/30' },
+  EMPTY: { label: 'Class Empty', className: 'bg-status-empty/15 text-status-empty border-status-empty/30' },
   UNKNOWN: { label: 'Unknown', className: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
 };
 

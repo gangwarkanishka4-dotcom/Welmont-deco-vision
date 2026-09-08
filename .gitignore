@@ -39,3 +39,4 @@ storage/snapshots/*
 # Misc
 .DS_Store
 *.log
+backend/.backups/

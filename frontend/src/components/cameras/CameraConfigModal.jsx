@@ -3,6 +3,15 @@ import { Modal } from '../Modal.jsx';
 import { Spinner } from '../Spinner.jsx';
 import { api } from '../../services/api.js';
 
+// Must match backend Settings.reference_adult_height_cm — the assumed
+// average adult height that a calibration reference_height_px represents.
+// Letting the user measure ANY known-height person/object (not necessarily
+// an actual adult) and telling us its real height lets us scale their
+// measured pixel height to what an "average adult" would measure at that
+// same row, per the formula in addCalibrationRow below.
+const REFERENCE_ADULT_HEIGHT_CM = 165;
+const FEET_TO_CM = 30.48;
+
 export function CameraConfigModal({ open, onClose, camera }) {
   const [mode, setMode] = useState('roi');
   const [loading, setLoading] = useState(true);
@@ -12,9 +21,14 @@ export function CameraConfigModal({ open, onClose, camera }) {
   const [roiPoints, setRoiPoints] = useState([]);
   const [calibrationPoints, setCalibrationPoints] = useState([]);
   const [adultRatio, setAdultRatio] = useState('1.0');
-  const [childRatio, setChildRatio] = useState('0.6');
-  const [pendingPixelY, setPendingPixelY] = useState(null);
-  const [pendingHeight, setPendingHeight] = useState('');
+  const [childRatio, setChildRatio] = useState('0.56');
+  // Two clicks measure one calibration point directly on the image instead
+  // of requiring the user to type a pixel-height number they'd otherwise
+  // have to work out by hand: click 1 = feet, click 2 = top of head.
+  const [pendingCalibClicks, setPendingCalibClicks] = useState([]);
+  const [pendingRealHeightFeet, setPendingRealHeightFeet] = useState('5.5');
+  const [gateLine, setGateLine] = useState([]);
+  const [gateInside, setGateInside] = useState(null);
 
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -31,6 +45,8 @@ export function CameraConfigModal({ open, onClose, camera }) {
         setCalibrationPoints(cfg.calibration_points ?? []);
         setAdultRatio(String(cfg.adult_height_ratio ?? 1.0));
         setChildRatio(String(cfg.child_height_ratio ?? 0.6));
+        setGateLine(cfg.gate_line ?? []);
+        setGateInside(cfg.gate_inside_point ?? null);
       })
       .catch(() => undefined)
       .finally(() => {
@@ -104,14 +120,53 @@ export function CameraConfigModal({ open, onClose, camera }) {
       ctx.fillText(`${cp.reference_height_px}px ref`, 6, y - 4);
     });
 
-    if (pendingPixelY !== null) {
-      const y = toDisplay({ x: 0, y: pendingPixelY }).y;
+    if (pendingCalibClicks.length > 0) {
+      const pts = pendingCalibClicks.map(toDisplay);
+      pts.forEach((p, i) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#22c55e';
+        ctx.fill();
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText(i === 0 ? 'feet' : 'head', p.x + 8, p.y + 4);
+      });
+      if (pts.length === 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    }
+
+    if (gateLine.length > 0) {
+      const pts = gateLine.map(toDisplay);
+      if (pts.length === 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.strokeStyle = '#ef4444';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+      pts.forEach((p) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#ef4444';
+        ctx.fill();
+      });
+    }
+    if (gateInside) {
+      const p = toDisplay(gateInside);
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#22c55e';
+      ctx.fill();
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = '#22c55e';
+      ctx.fillText('inside', p.x + 8, p.y + 4);
     }
   };
 
@@ -130,8 +185,14 @@ export function CameraConfigModal({ open, onClose, camera }) {
     const native = toNative(display);
     if (mode === 'roi') {
       setRoiPoints((prev) => [...prev, native]);
-    } else {
-      setPendingPixelY(Math.round(native.y));
+    } else if (mode === 'gate') {
+      if (gateLine.length < 2) {
+        setGateLine((prev) => [...prev, native]);
+      } else if (!gateInside) {
+        setGateInside(native);
+      }
+    } else if (mode === 'calibration') {
+      setPendingCalibClicks((prev) => (prev.length < 2 ? [...prev, native] : prev));
     }
   };
 
@@ -165,11 +226,33 @@ export function CameraConfigModal({ open, onClose, camera }) {
     }
   };
 
+  const saveGate = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api.saveGateLine(camera.id, { gate_line: gateLine, gate_inside_point: gateInside });
+      setMessage('Gate line saved.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to save gate line');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addCalibrationRow = () => {
-    if (pendingPixelY === null || !pendingHeight) return;
-    setCalibrationPoints((prev) => [...prev, { pixel_y: pendingPixelY, reference_height_px: Number(pendingHeight) }]);
-    setPendingPixelY(null);
-    setPendingHeight('');
+    if (pendingCalibClicks.length !== 2) return;
+    const realHeightFeet = Number(pendingRealHeightFeet);
+    if (!realHeightFeet || realHeightFeet <= 0) return;
+    const [feetPoint, headPoint] = pendingCalibClicks;
+    const measuredPx = Math.abs(headPoint.y - feetPoint.y);
+    const realHeightCm = realHeightFeet * FEET_TO_CM;
+    // Scale to what an average adult (REFERENCE_ADULT_HEIGHT_CM) would
+    // measure at this same row, since that's what reference_height_px means
+    // to the backend — the person/object actually measured doesn't need to
+    // be that height itself.
+    const referenceHeightPx = Math.round(measuredPx * (REFERENCE_ADULT_HEIGHT_CM / realHeightCm));
+    setCalibrationPoints((prev) => [...prev, { pixel_y: Math.round(feetPoint.y), reference_height_px: referenceHeightPx }]);
+    setPendingCalibClicks([]);
   };
 
   return (
@@ -180,6 +263,9 @@ export function CameraConfigModal({ open, onClose, camera }) {
         </button>
         <button className={mode === 'calibration' ? 'btn-primary' : 'btn-secondary'} onClick={() => setMode('calibration')}>
           Height Calibration
+        </button>
+        <button className={mode === 'gate' ? 'btn-primary' : 'btn-secondary'} onClick={() => setMode('gate')}>
+          Gate Line
         </button>
       </div>
 
@@ -214,26 +300,72 @@ export function CameraConfigModal({ open, onClose, camera }) {
                   </button>
                 </div>
               </>
+            ) : mode === 'gate' ? (
+              <>
+                <p className="text-xs text-slate-400">
+                  Click 2 points to draw the gate/entrance line, then a 3rd point anywhere clearly inside the classroom
+                  (green) to mark which side is "inside." A tracked person is only counted as entering when they cross
+                  this line from outside to inside — merely standing near the gate doesn't count.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Line points: {gateLine.length}/2 {gateInside ? '· inside point set' : ''}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    className="btn-secondary flex-1"
+                    onClick={() => {
+                      setGateLine([]);
+                      setGateInside(null);
+                    }}
+                  >
+                    Reset
+                  </button>
+                  <button className="btn-primary flex-1" disabled={saving || gateLine.length !== 2 || !gateInside} onClick={saveGate}>
+                    {saving ? <Spinner /> : 'Save Gate Line'}
+                  </button>
+                </div>
+              </>
             ) : (
               <>
                 <p className="text-xs text-slate-400">
-                  Click a row/point on the image, enter the reference height for that pixel row, then add it. Adult/child
-                  height ratios refine how the pipeline classifies a tracked box's height against the calibration curve.
+                  Stand any person or object of a known height where you want to calibrate. Click their feet, then
+                  click the top of their head — the pixel height in between is measured automatically. Tell it the
+                  real height of whoever/whatever you measured (in feet — doesn't have to be an adult), and it works
+                  out the equivalent for this row. Add a few of these at different rows (near and far from the camera)
+                  for best accuracy.
                 </p>
-                {pendingPixelY !== null && (
+                {pendingCalibClicks.length > 0 && (
                   <div className="flex items-end gap-2 rounded-md border border-surface-600 p-2">
-                    <div className="flex-1">
-                      <label className="label">Pixel Y: {pendingPixelY}</label>
-                      <input
-                        className="input w-full"
-                        placeholder="Reference height (px)"
-                        value={pendingHeight}
-                        onChange={(e) => setPendingHeight(e.target.value)}
-                      />
+                    <div className="flex-1 text-xs text-slate-300">
+                      {pendingCalibClicks.length === 1 ? (
+                        <p>Feet marked at row {Math.round(pendingCalibClicks[0].y)}. Now click the top of their head.</p>
+                      ) : (
+                        <div className="flex items-end gap-2">
+                          <p>
+                            Measured: <span className="font-semibold text-slate-100">
+                              {Math.round(Math.abs(pendingCalibClicks[1].y - pendingCalibClicks[0].y))}px
+                            </span>{' '}
+                            tall at row {Math.round(pendingCalibClicks[0].y)}
+                          </p>
+                          <div>
+                            <label className="label">Real height (feet)</label>
+                            <input
+                              className="input w-24"
+                              value={pendingRealHeightFeet}
+                              onChange={(e) => setPendingRealHeightFeet(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <button className="btn-primary" onClick={addCalibrationRow}>
-                      Add
+                    <button className="btn-secondary" onClick={() => setPendingCalibClicks([])}>
+                      Reset
                     </button>
+                    {pendingCalibClicks.length === 2 && (
+                      <button className="btn-primary" onClick={addCalibrationRow}>
+                        Add
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="max-h-40 overflow-y-auto rounded-md border border-surface-700">

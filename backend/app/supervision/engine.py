@@ -87,10 +87,6 @@ class ClassroomMonitor:
             )
 
         if result.just_resolved:
-            if result.resolution_reason == "adult_returned":
-                await self.event_bus.publish(
-                    Event(EventType.ADULT_RETURNED, {**base_payload, "incident_id": result.incident_id})
-                )
             # AlertManager is the sole publisher of the outward, DB-enriched
             # ALERT_RESOLVED event — this is the raw supervision-layer signal
             # that tells it an alert (if one exists for this incident) should

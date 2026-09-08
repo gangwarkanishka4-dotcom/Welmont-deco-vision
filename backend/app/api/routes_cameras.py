@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -21,6 +22,7 @@ from app.schemas.camera import (
     CameraOut,
     CameraROIUpdate,
     CameraUpdate,
+    GateLineUpdate,
 )
 from app.workers.bootstrap import start_camera_worker
 
@@ -90,7 +92,7 @@ async def update_camera(camera_id: str, payload: CameraUpdate, request: Request,
     return camera
 
 
-@router.delete("/{camera_id}", status_code=204)
+@router.delete("/{camera_id}", status_code=204, response_model=None)
 async def delete_camera(camera_id: str, request: Request, db: AsyncSession = Depends(get_db)) -> None:
     camera = await db.get(Camera, camera_id)
     if camera is None:
@@ -139,6 +141,8 @@ async def test_camera(camera_id: str, db: AsyncSession = Depends(get_db)) -> dic
     url = camera.build_rtsp_url(password)
 
     def _try_open() -> tuple[bool, str]:
+        # See app/workers/pipeline.py for why this is forced.
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
         cap = cv2.VideoCapture(url)
         try:
             if not cap.isOpened():
@@ -208,6 +212,25 @@ async def set_calibration(camera_id: str, payload: CameraCalibrationUpdate, requ
     return _config_out(config)
 
 
+@router.post("/{camera_id}/gate", response_model=CameraConfigurationOut)
+async def set_gate(camera_id: str, payload: GateLineUpdate, request: Request, db: AsyncSession = Depends(get_db)) -> CameraConfigurationOut:
+    config = await db.scalar(select(CameraConfiguration).where(CameraConfiguration.camera_id == camera_id))
+    if config is None:
+        raise HTTPException(404, "Camera configuration not found")
+
+    config.gate_line = [p.model_dump() for p in payload.gate_line]
+    config.gate_inside_point = payload.gate_inside_point.model_dump()
+    await db.commit()
+    await db.refresh(config)
+
+    worker = request.app.state.registry.get(camera_id)
+    if worker is not None:
+        worker.calibration.gate_line = tuple((p.x, p.y) for p in payload.gate_line)
+        worker.calibration.gate_inside_point = (payload.gate_inside_point.x, payload.gate_inside_point.y)
+
+    return _config_out(config)
+
+
 @router.get("/{camera_id}/configuration", response_model=CameraConfigurationOut)
 async def get_configuration(camera_id: str, db: AsyncSession = Depends(get_db)) -> CameraConfigurationOut:
     config = await db.scalar(select(CameraConfiguration).where(CameraConfiguration.camera_id == camera_id))
@@ -223,6 +246,8 @@ def _config_out(config: CameraConfiguration) -> CameraConfigurationOut:
         calibration_points=config.calibration_points,
         adult_height_ratio=config.adult_height_ratio,
         child_height_ratio=config.child_height_ratio,
+        gate_line=config.gate_line,
+        gate_inside_point=config.gate_inside_point,
     )
 
 

@@ -132,6 +132,16 @@ MIN_HEAD_WIDTH_FOR_BUILD_RATIO = 12.0
 # width) — this rejects that measurement instead of trusting it blindly.
 HEAD_TURN_OFFSET_RATIO = 0.5
 
+# Lower bound on a physically plausible shoulder-width/head-width ratio. No
+# human's head is as wide as or wider than their own shoulders (even a
+# 3-3.5y toddler's head is only "nearly as wide" per the pose signal's own
+# design) — a measured ratio below this means the ear-to-ear distance is
+# keypoint noise, not a real narrow-shoulder reading. Real footage
+# 2026-09-08: an adult bent over a desk (occluded ankles, odd viewing angle)
+# produced build_ratio=0.08 — head_width ~12x shoulder_width — which the
+# sigmoid then confidently scored as CHILD instead of being rejected.
+MIN_PLAUSIBLE_BUILD_RATIO = 1.0
+
 # Welmont Lalkothi's student uniform (per the site): white top, black
 # shorts/bottoms — confirmed 2026-09-08. A confident match is strong,
 # scale-independent evidence of a student, immune to the pose-keypoint
@@ -385,7 +395,10 @@ class HeuristicAgeClassifier(AgeGroupClassifier):
                     # or bent over a desk, and facing the camera or away
                     # from it.
                     build_ratio = shoulder_width / head_width
-                    scores.append(_sigmoid(build_ratio, midpoint=1.5, steepness=3.5))
+                    if build_ratio >= MIN_PLAUSIBLE_BUILD_RATIO:
+                        scores.append(_sigmoid(build_ratio, midpoint=1.5, steepness=3.5))
+                    else:
+                        build_ratio = None  # implausible — ear keypoints are noise, not a real head-width
 
         hip = _midpoint(pose.get("left_hip"), pose.get("right_hip"))
         ankle = _midpoint(pose.get("left_ankle"), pose.get("right_ankle"))

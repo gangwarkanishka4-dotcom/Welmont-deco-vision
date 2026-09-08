@@ -21,8 +21,17 @@ class CameraConfiguration(Base):
     roi_polygon: Mapped[list] = mapped_column(JSON, default=list)  # [{"x": .., "y": ..}, ...]
     calibration_points: Mapped[list] = mapped_column(JSON, default=list)  # [{"pixel_y": .., "reference_height_px": ..}]
 
+    # Gate/entrance line for directional footfall: two points defining the
+    # line, plus one point known to sit on the "inside" (classroom) side —
+    # together they let app.cv.calibration.roi.CameraCalibration.crossing()
+    # tell an entering crossing from an exiting one.
+    gate_line: Mapped[list] = mapped_column(JSON, default=list)  # [{"x": .., "y": ..}, {"x": .., "y": ..}]
+    gate_inside_point: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"x": .., "y": ..}
+
     adult_height_ratio: Mapped[float] = mapped_column(Float, default=0.85)
-    child_height_ratio: Mapped[float] = mapped_column(Float, default=0.60)
+    # Target child height ~92.5cm (spec: 90-95cm) / an assumed 165cm average
+    # adult reference height (Settings.reference_adult_height_cm) ≈ 0.56.
+    child_height_ratio: Mapped[float] = mapped_column(Float, default=0.56)
 
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -37,4 +46,6 @@ class CameraConfiguration(Base):
             reference_points=[ReferencePoint(p["pixel_y"], p["reference_height_px"]) for p in self.calibration_points],
             adult_height_ratio=self.adult_height_ratio,
             child_height_ratio=self.child_height_ratio,
+            gate_line=tuple((p["x"], p["y"]) for p in self.gate_line) if len(self.gate_line) == 2 else None,
+            gate_inside_point=(self.gate_inside_point["x"], self.gate_inside_point["y"]) if self.gate_inside_point else None,
         )

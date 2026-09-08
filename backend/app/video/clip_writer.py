@@ -70,7 +70,10 @@ class ClipWriter:
                 session.add(clip)
                 alert = await session.get(Alert, alert_id)
                 if alert is not None:
-                    alert.clip_url = str(file_path)
+                    # A browser-servable URL (see the /media/clips StaticFiles
+                    # mount in app.main), not the raw filesystem path — that's
+                    # what VideoClip.file_path is for (retention sweep).
+                    alert.clip_url = f"/media/clips/{file_path.name}"
                 await session.commit()
 
             logger.info("Incident clip written for alert %s: %s (%d frames)", alert_id, file_path, len(frames))

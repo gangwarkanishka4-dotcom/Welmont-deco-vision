@@ -3,9 +3,6 @@ from app.models.alert_event import AlertEvent
 from app.models.camera import Camera
 from app.models.camera_configuration import CameraConfiguration
 from app.models.classroom import Classroom
-from app.models.system_log import AccessLog, SystemLog
-from app.models.tracked_event import TrackedEvent
-from app.models.user import User
 from app.models.video_clip import VideoClip
 
 __all__ = [
@@ -14,9 +11,5 @@ __all__ = [
     "Camera",
     "CameraConfiguration",
     "Classroom",
-    "AccessLog",
-    "SystemLog",
-    "TrackedEvent",
-    "User",
     "VideoClip",
 ]

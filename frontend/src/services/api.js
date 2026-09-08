@@ -56,8 +56,13 @@ export const api = {
   saveRoi: (id, body) => request(`/api/cameras/${id}/roi`, { method: 'POST', body: JSON.stringify(body) }),
   saveCalibration: (id, body) =>
     request(`/api/cameras/${id}/calibration`, { method: 'POST', body: JSON.stringify(body) }),
+  saveGateLine: (id, body) => request(`/api/cameras/${id}/gate`, { method: 'POST', body: JSON.stringify(body) }),
 
   // Alerts
+  // Alert.clip_url from the API is a path (e.g. /media/clips/<alert_id>.mp4)
+  // served by the backend's StaticFiles mount — resolve it against the same
+  // API origin the rest of this client talks to.
+  clipUrl: (alert) => (alert?.clip_url ? `${API_BASE_URL}${alert.clip_url}` : null),
   listAlerts: (params = {}) => request(`/api/alerts${qs(params)}`),
   getAlert: (id) => request(`/api/alerts/${id}`),
   getAlertEvents: (id) => request(`/api/alerts/${id}/events`),

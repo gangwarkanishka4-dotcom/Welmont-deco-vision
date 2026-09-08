@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from app.api.routes_alerts import router as alerts_router
@@ -117,6 +118,11 @@ def create_app() -> FastAPI:
     app.include_router(cameras_router)
     app.include_router(alerts_router)
     app.include_router(classrooms_router)
+
+    # Serves incident clips (Alert.clip_url points at /media/clips/<alert_id>.mp4)
+    # so the dashboard's "View Clip" player can load them directly.
+    settings.ensure_storage_dirs()
+    app.mount("/media/clips", StaticFiles(directory=settings.clip_storage_dir), name="clips")
 
     @app.get("/api/health")
     async def health() -> dict:

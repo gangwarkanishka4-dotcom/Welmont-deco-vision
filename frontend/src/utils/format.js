@@ -9,9 +9,3 @@ export function formatSecondsDuration(totalSecondsInput) {
   const minutes = totalMinutes % 60;
   return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
 }
-
-/** Formats the elapsed time between an ISO timestamp and now as a short human duration (e.g. "3h 12m", "45s"). */
-export function formatDuration(iso) {
-  const ms = Math.max(0, Date.now() - new Date(iso).getTime());
-  return formatSecondsDuration(ms / 1000);
-}

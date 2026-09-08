@@ -36,7 +36,6 @@ class Alert(Base):
     children_count: Mapped[int] = mapped_column(Integer, default=0)
     adult_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    snapshot_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     clip_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

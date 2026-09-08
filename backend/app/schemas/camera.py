@@ -75,9 +75,16 @@ class CameraCalibrationUpdate(BaseModel):
     child_height_ratio: float | None = None
 
 
+class GateLineUpdate(BaseModel):
+    gate_line: list[ROIPoint] = Field(min_length=2, max_length=2)
+    gate_inside_point: ROIPoint
+
+
 class CameraConfigurationOut(BaseModel):
     camera_id: str
     roi: list[ROIPoint]
     calibration_points: list[CalibrationPoint]
     adult_height_ratio: float
     child_height_ratio: float
+    gate_line: list[ROIPoint] = []
+    gate_inside_point: ROIPoint | None = None

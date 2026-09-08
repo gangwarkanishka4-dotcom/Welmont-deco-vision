@@ -6,7 +6,6 @@ const NAV_ITEMS = [
   { to: '/live', label: 'Live Monitoring', icon: '▶' },
   { to: '/alerts', label: 'Alerts', icon: '⚠' },
   { to: '/analytics', label: 'Analytics', icon: '▩' },
-  { to: '/attendance', label: 'Attendance', icon: '◐' },
   { to: '/user-access', label: 'User Access', icon: '☺' },
   { to: '/settings', label: 'Settings', icon: '⚙' },
 ];

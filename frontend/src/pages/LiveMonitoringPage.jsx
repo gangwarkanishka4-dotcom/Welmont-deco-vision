@@ -9,7 +9,7 @@ const STATE_META = {
   SUPERVISED: { icon: '🟢', label: 'Supervised', className: 'text-status-supervised' },
   WAITING_FOR_ADULT: { icon: '🟠', label: 'Waiting for Adult', className: 'text-status-waiting' },
   UNSUPERVISED: { icon: '🔴', label: 'Unsupervised', className: 'text-status-unsupervised' },
-  EMPTY: { icon: '⚪', label: 'Empty', className: 'text-slate-400' },
+  EMPTY: { icon: '⚪', label: 'Class Empty', className: 'text-slate-400' },
   UNKNOWN: { icon: '⚪', label: 'Unknown', className: 'text-slate-400' },
 };
 

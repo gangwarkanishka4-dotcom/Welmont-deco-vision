@@ -19,7 +19,6 @@ class AlertOut(BaseModel):
     resolved_at: datetime | None
     children_count: int
     adult_count: int
-    snapshot_url: str | None
     clip_url: str | None
     created_at: datetime
 

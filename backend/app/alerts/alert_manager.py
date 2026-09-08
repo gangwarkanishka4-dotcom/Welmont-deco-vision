@@ -31,10 +31,10 @@ logger = logging.getLogger(__name__)
 
 class MediaProvider(Protocol):
     """Injected by the camera worker layer so AlertManager never touches
-    OpenCV directly. Both methods are best-effort — a failure here must never
-    block alert creation/resolution."""
+    OpenCV directly. Best-effort — a failure here must never block alert
+    creation/resolution. Incident evidence is a video clip only (spec §13) —
+    there is deliberately no snapshot-capture method."""
 
-    async def capture_snapshot(self, camera_id: str, alert_id: str) -> str | None: ...
     async def request_incident_clip(self, camera_id: str, alert_id: str) -> None: ...
 
 
@@ -108,12 +108,9 @@ class AlertManager:
 
         if self.media_provider is not None:
             try:
-                snapshot_path = await self.media_provider.capture_snapshot(alert.camera_id, alert.alert_id)
-                if snapshot_path:
-                    await self._set_snapshot_url(alert.alert_id, snapshot_path)
                 await self.media_provider.request_incident_clip(alert.camera_id, alert.alert_id)
             except Exception:
-                logger.exception("Media capture failed for alert %s (non-fatal)", alert.alert_id)
+                logger.exception("Incident clip capture failed for alert %s (non-fatal)", alert.alert_id)
 
     async def _on_supervision_restored(self, event: Event) -> None:
         incident_id = event.payload["incident_id"]
@@ -149,13 +146,6 @@ class AlertManager:
         logger.info("Alert %s resolved (%s)", alert_id, reason)
         return alert
 
-    async def _set_snapshot_url(self, alert_id: str, snapshot_path: str) -> None:
-        async with self.session_factory() as session:
-            alert = await session.get(Alert, alert_id)
-            if alert:
-                alert.snapshot_url = snapshot_path
-                await session.commit()
-
     async def _log_alert_event(self, alert_id: str, event_type: str, message: str) -> None:
         async with self.session_factory() as session:
             session.add(AlertEvent(alert_id=alert_id, event_type=event_type, message=message))
@@ -176,6 +166,5 @@ def _alert_payload(alert: Alert) -> dict:
         "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
         "children_count": alert.children_count,
         "adult_count": alert.adult_count,
-        "snapshot_url": alert.snapshot_url,
         "clip_url": alert.clip_url,
     }

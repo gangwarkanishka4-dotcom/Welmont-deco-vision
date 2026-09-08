@@ -21,11 +21,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
+
+# Force RTSP-over-TCP: the control handshake (SETUP/PLAY) is TCP regardless, but
+# ffmpeg defaults the actual RTP media to UDP, which routinely gets dropped by
+# NAT/firewalls on WAN links — the stream then "opens" but every frame read times
+# out. Must be set before any cv2.VideoCapture(rtsp://...) call in this process.
+os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
 
 from app.config import Settings
 from app.cv.calibration.overlay import draw_overlay
@@ -117,6 +124,12 @@ class CameraWorker:
         self._cap: cv2.VideoCapture | None = None
         self._track_last_seen: dict[int, float] = {}
 
+        # Gate-crossing footfall state (see app.cv.calibration.roi.CameraCalibration.crossing).
+        # Only used once a gate line has been configured for this camera —
+        # until then, occupancy falls back to plain ROI containment below.
+        self._prev_foot: dict[int, tuple[float, float]] = {}
+        self._inside_ids: set[int] = set()
+
     async def run(self) -> None:
         detect_interval = 1.0 / max(1, self.settings.inference_fps)
         last_detect_at = 0.0
@@ -187,7 +200,27 @@ class CameraWorker:
                 track.track_id, label, classification.smoothed_adult_score, in_roi, self.camera_id,
             )
 
-            if in_roi:
+            # Gate-based directional footfall: only count a track as "inside
+            # the classroom" once it has actually crossed the configured
+            # gate line (not merely because it appears somewhere in the ROI).
+            # Until a gate is drawn for this camera, fall back to plain ROI
+            # containment so nothing regresses.
+            counts_toward_occupancy = in_roi
+            if self.calibration.is_gate_configured():
+                foot = track.detection.foot_point
+                prev_foot = self._prev_foot.get(track.track_id)
+                if prev_foot is not None:
+                    crossing = self.calibration.crossing(prev_foot, foot)
+                    if crossing == "entered":
+                        self._inside_ids.add(track.track_id)
+                        await self._publish_gate_event(EventType.PERSON_ENTERED, track, classification, timestamp)
+                    elif crossing == "exited":
+                        self._inside_ids.discard(track.track_id)
+                        await self._publish_gate_event(EventType.PERSON_EXITED, track, classification, timestamp)
+                self._prev_foot[track.track_id] = foot
+                counts_toward_occupancy = in_roi and track.track_id in self._inside_ids
+
+            if counts_toward_occupancy:
                 if classification.label == AgeLabel.ADULT:
                     adult_count += 1
                 elif classification.label == AgeLabel.CHILD:
@@ -215,6 +248,18 @@ class CameraWorker:
             if last_seen is not None and timestamp - last_seen > self.settings.track_timeout_seconds:
                 self.history.forget(stale_id)
                 self._track_last_seen.pop(stale_id, None)
+                # A track that vanished without a matching "exited" gate
+                # crossing (tracker lost it, camera glitch, ...) must not
+                # permanently inflate the occupancy count.
+                self._inside_ids.discard(stale_id)
+                self._prev_foot.pop(stale_id, None)
+
+        # Child-first gating (spec): with no child/unknown present, adult
+        # presence is neither counted nor alerted on — the classroom is
+        # simply "Class Empty" regardless of how many adults the classifier
+        # currently sees.
+        if child_count + unknown_count == 0:
+            adult_count = 0
 
         result = await self.monitor.process_frame(timestamp, adult_count, child_count, unknown_count)
 
@@ -256,6 +301,32 @@ class CameraWorker:
             )
         )
 
+    async def _publish_gate_event(self, event_type: EventType, track, classification, timestamp: float) -> None:
+        """Fires once per gate crossing (spec §8): captures the track's
+        current best-effort label/height immediately on entry/exit rather
+        than waiting — RollingClassificationHistory has already been
+        smoothing this track's score every classification cycle, so
+        `classification` here reflects a few frames of debouncing, not a
+        single noisy read."""
+        height_ratio = self.calibration.height_ratio(track.detection)
+        estimated_height_cm = (
+            round(height_ratio * self.settings.reference_adult_height_cm, 1) if height_ratio is not None else None
+        )
+        await self.event_bus.publish(
+            Event(
+                event_type,
+                {
+                    "camera_id": self.camera_id,
+                    "classroom_id": self.classroom_id,
+                    "track_id": track.track_id,
+                    "label": classification.label.value,
+                    "confidence": classification.smoothed_adult_score,
+                    "estimated_height_cm": estimated_height_cm,
+                    "timestamp": timestamp,
+                },
+            )
+        )
+
     def render_overlay_jpeg(self) -> bytes | None:
         if self.latest_frame is None:
             return None
@@ -289,17 +360,6 @@ class CameraWorker:
         self._release_capture()
 
     # MediaProvider protocol (see app.alerts.alert_manager) ------------------
-    async def capture_snapshot(self, alert_id: str, storage_dir: str) -> str | None:
-        from pathlib import Path
-
-        jpeg = self.render_overlay_jpeg()
-        if jpeg is None:
-            return None
-        path = Path(storage_dir) / f"{alert_id}.jpg"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(path.write_bytes, jpeg)
-        return str(path)
-
     def request_incident_clip(self, alert_id: str) -> None:
         tail_seconds = self.settings.video_buffer_seconds
         self.clip_writer.schedule_incident_clip(self.camera_id, alert_id, self.ring_buffer, tail_seconds)

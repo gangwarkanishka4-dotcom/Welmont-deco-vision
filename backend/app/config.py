@@ -44,11 +44,15 @@ class Settings(BaseSettings):
     adult_grace_period_seconds: float = 3.0
     camera_offline_timeout_seconds: float = 5.0
 
+    # Assumed average adult height (cm), used only to convert a person's
+    # calibration-derived height *ratio* into a display centimeter estimate —
+    # not a precision measurement. Adjust to the real local average if known.
+    reference_adult_height_cm: float = 165.0
+
     # Video buffer / clips
     video_buffer_seconds: int = 10
     video_retention_days: int = 7
     clip_storage_dir: str = "./storage/clips"
-    snapshot_storage_dir: str = "./storage/snapshots"
 
     # Hardware
     alert_output_driver: str = "mock"  # mock | network_relay | esp32
@@ -70,7 +74,6 @@ class Settings(BaseSettings):
 
     def ensure_storage_dirs(self) -> None:
         Path(self.clip_storage_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.snapshot_storage_dir).mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

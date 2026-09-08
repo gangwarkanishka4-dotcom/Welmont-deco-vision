@@ -87,13 +87,17 @@ export function AlertDetailView({ alertId }) {
         <Field label="Resolved" value={alert.resolved_at ? new Date(alert.resolved_at).toLocaleString() : '—'} />
       </div>
 
-      {alert.snapshot_url && (
-        <img src={alert.snapshot_url} alt="Alert snapshot" className="mt-4 max-h-72 rounded-md border border-surface-700" />
-      )}
-      {alert.clip_url && (
-        <a href={alert.clip_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-accent-400 hover:underline">
-          View clip →
-        </a>
+      {alert.clip_url ? (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Incident Clip</p>
+          <video
+            controls
+            src={api.clipUrl(alert)}
+            className="max-h-96 w-full rounded-md border border-surface-700 bg-black"
+          />
+        </div>
+      ) : (
+        <p className="mt-4 text-xs text-slate-500">Incident clip not yet available.</p>
       )}
 
       <div className="mt-5 flex gap-2">

@@ -7,7 +7,6 @@ const TITLES = [
   ['/live', 'Live Monitoring'],
   ['/alerts', 'Alerts'],
   ['/analytics', 'Analytics'],
-  ['/attendance', 'Attendance'],
   ['/user-access', 'User Access'],
   ['/settings', 'Settings'],
 ];

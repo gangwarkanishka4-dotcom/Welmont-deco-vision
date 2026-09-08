@@ -13,6 +13,12 @@ export function AlertToastProvider({ children }) {
   const navigate = useNavigate();
   const beepOnce = useBeepOnce();
 
+  // Local-only by design: dismissing (✕ or the 15s auto-dismiss below) must
+  // never call acknowledge/resolve — it only hides this transient popup.
+  // The underlying Alert row's status is untouched, and the incident stays
+  // visible on the Dashboard's "ACTIVE ALERT" ribbon and the Alerts page
+  // until the real condition resolves (adult returns) or an operator
+  // explicitly resolves it from AlertDetailView.
   const dismiss = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);

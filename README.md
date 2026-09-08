@@ -90,7 +90,7 @@ classroom-monitor/
 │   ├── tests/                     pytest suite (see below)
 │   ├── scripts/seed_welmont.py    Example seed data
 │   └── requirements.txt
-├── frontend/                      React + TypeScript + Tailwind dashboard
+├── frontend/                      React + JS/JSX + Tailwind dashboard
 ├── models/                        Model weights (mounted volume, see models/README.md)
 ├── docker/                        Dockerfiles + nginx config
 ├── docker-compose.yml
@@ -357,26 +357,24 @@ better throughput on GPU or with one camera per process.
 
 ## Privacy
 
-- No facial recognition, no name-based identity — only `track_id` (an
-  arbitrary per-session integer) + age-group label (`ADULT`/`CHILD`/
-  `UNKNOWN`) are ever stored (`TrackedEvent`).
+- No facial recognition, no name-based identity — only a per-session
+  `track_id` (an arbitrary integer) + age-group label (`ADULT`/`CHILD`/
+  `UNKNOWN`) are ever used, and only transiently in-memory during tracking.
 - RTSP credentials are encrypted at rest (Fernet, `CREDENTIAL_ENCRYPTION_KEY`)
   and never returned by the API (`CameraOut` excludes both the plaintext and
   encrypted password fields).
-- Clips and snapshots are retained for `VIDEO_RETENTION_DAYS` (default 7)
-  and automatically deleted by a background sweep (`app/video/retention.py`).
-- `AccessLog` exists to record access to incident recordings — wire it into
-  your clip/snapshot download endpoints if you add authenticated access
-  control (not yet implemented — see limitations below).
+- Incident clips are retained for `VIDEO_RETENTION_DAYS` (default 7) and
+  automatically deleted by a background sweep (`app/video/retention.py`).
 
 ## Known limitations / what's next
 
 Being direct about what's genuinely done vs. still open, rather than
 overclaiming:
 
-- **No authentication/authorization yet.** `User`/`UserRole` models exist
-  but there's no login flow or route protection — every API endpoint is
-  currently open. Add this before exposing the API beyond a trusted network.
+- **No authentication/authorization.** Every API endpoint is currently open.
+  If you need this, it requires real design work (login flow, route
+  protection, credential storage) — add it before exposing the API beyond a
+  trusted network.
 - **Split CV-worker/API deployment** (`app/worker_main.py` +
   `RedisEventBus`) is implemented for the event-bus/inference side, but
   camera CRUD/ROI/calibration/enable-disable and manual alert

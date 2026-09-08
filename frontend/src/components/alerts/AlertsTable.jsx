@@ -10,7 +10,7 @@ export function AlertsTable({ alerts, classroomsById }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-surface-700 text-left text-xs uppercase tracking-wide text-slate-500">
-            <th className="px-4 py-3">Snapshot</th>
+            <th className="px-4 py-3">Incident Clip</th>
             <th className="px-4 py-3">Classroom</th>
             <th className="px-4 py-3">Severity</th>
             <th className="px-4 py-3">Status</th>
@@ -28,8 +28,10 @@ export function AlertsTable({ alerts, classroomsById }) {
               onClick={() => navigate(`/alerts/${a.alert_id}`)}
             >
               <td className="px-4 py-2">
-                {a.snapshot_url ? (
-                  <img src={a.snapshot_url} alt="" className="h-10 w-16 rounded object-cover" />
+                {a.clip_url ? (
+                  <span className="flex h-10 w-16 items-center justify-center rounded bg-surface-800 text-accent-400" title="Incident clip recorded">
+                    ▶
+                  </span>
                 ) : (
                   <div className="h-10 w-16 rounded bg-surface-800" />
                 )}

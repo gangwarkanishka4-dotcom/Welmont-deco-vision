@@ -9,7 +9,6 @@ import { LiveMonitoringIndexPage } from './pages/LiveMonitoringIndexPage.jsx';
 import { LiveMonitoringPage } from './pages/LiveMonitoringPage.jsx';
 import { AlertsPage } from './pages/AlertsPage.jsx';
 import { AnalyticsPage } from './pages/AnalyticsPage.jsx';
-import { AttendancePage } from './pages/AttendancePage.jsx';
 import { UserAccessPage } from './pages/UserAccessPage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
 
@@ -28,7 +27,6 @@ export default function App() {
                 <Route path="alerts" element={<AlertsPage />} />
                 <Route path="alerts/:alertId" element={<AlertsPage />} />
                 <Route path="analytics" element={<AnalyticsPage />} />
-                <Route path="attendance" element={<AttendancePage />} />
                 <Route path="user-access" element={<UserAccessPage />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>

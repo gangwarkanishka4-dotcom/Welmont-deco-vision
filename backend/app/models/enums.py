@@ -3,12 +3,6 @@ from __future__ import annotations
 import enum
 
 
-class UserRole(str, enum.Enum):
-    ADMIN = "ADMIN"
-    OPERATOR = "OPERATOR"
-    VIEWER = "VIEWER"
-
-
 class CameraStatus(str, enum.Enum):
     ONLINE = "ONLINE"
     OFFLINE = "OFFLINE"

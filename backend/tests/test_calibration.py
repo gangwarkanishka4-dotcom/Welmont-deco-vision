@@ -82,3 +82,41 @@ def test_no_reference_points_returns_none_not_a_guess():
     calibration = CameraCalibration(camera_id="cam-1")
     detection = Detection(x1=0, y1=0, x2=50, y2=100, confidence=0.9)
     assert calibration.height_ratio(detection) is None
+
+
+# Gate/entrance directional crossing (spec §7): "inside" is the larger-y side
+# of the horizontal line y=100, per the (50, 150) inside reference point.
+GATE_LINE = ((0, 100), (100, 100))
+GATE_INSIDE = (50, 150)
+
+
+def test_no_gate_configured_never_reports_a_crossing():
+    calibration = CameraCalibration(camera_id="cam-1")
+    assert calibration.is_gate_configured() is False
+    assert calibration.crossing((50, 50), (50, 150)) is None
+
+
+def test_gate_crossing_detects_entry():
+    calibration = CameraCalibration(camera_id="cam-1", gate_line=GATE_LINE, gate_inside_point=GATE_INSIDE)
+    assert calibration.is_gate_configured() is True
+    assert calibration.crossing((50, 50), (50, 150)) == "entered"
+
+
+def test_gate_crossing_detects_exit():
+    calibration = CameraCalibration(camera_id="cam-1", gate_line=GATE_LINE, gate_inside_point=GATE_INSIDE)
+    assert calibration.crossing((50, 150), (50, 50)) == "exited"
+
+
+def test_gate_crossing_none_when_staying_on_one_side():
+    """Standing/moving near the gate without crossing it must not register
+    as an entry or exit (spec: 'do not count a person simply because they
+    appear somewhere inside the classroom')."""
+    calibration = CameraCalibration(camera_id="cam-1", gate_line=GATE_LINE, gate_inside_point=GATE_INSIDE)
+    assert calibration.crossing((50, 120), (50, 130)) is None  # stayed inside
+    assert calibration.crossing((10, 50), (90, 60)) is None  # stayed outside
+
+
+def test_gate_crossing_ignores_point_exactly_on_the_line():
+    calibration = CameraCalibration(camera_id="cam-1", gate_line=GATE_LINE, gate_inside_point=GATE_INSIDE)
+    assert calibration.crossing((50, 100), (50, 150)) is None
+    assert calibration.crossing((50, 50), (50, 100)) is None

@@ -10,9 +10,10 @@ class EventType(str, Enum):
     ALERT_RESOLVED = "ALERT_RESOLVED"
     BUZZER_TRIGGERED = "BUZZER_TRIGGERED"
     BUZZER_CLEARED = "BUZZER_CLEARED"
-    ADULT_RETURNED = "ADULT_RETURNED"
     SUPERVISION_RESTORED = "SUPERVISION_RESTORED"  # internal signal consumed by AlertManager to resolve an alert
     CAMERA_OFFLINE = "CAMERA_OFFLINE"
     CAMERA_ONLINE = "CAMERA_ONLINE"
     CLASSROOM_STATUS_CHANGED = "CLASSROOM_STATUS_CHANGED"
     TRACKED_STATE_UPDATE = "TRACKED_STATE_UPDATE"  # per-frame debug/live overlay payload
+    PERSON_ENTERED = "PERSON_ENTERED"  # a tracked person crossed the gate line into the classroom
+    PERSON_EXITED = "PERSON_EXITED"  # a tracked person crossed the gate line out of the classroom

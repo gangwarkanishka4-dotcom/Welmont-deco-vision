@@ -51,12 +51,52 @@ class CameraCalibration:
     adult_height_ratio: float = 0.85
     # Ratio below which the geometry signal leans strongly "child".
     child_height_ratio: float = 0.60
+    # Gate/entrance line for directional footfall — two points defining the
+    # line, plus a point known to sit on the "inside" (classroom) side.
+    gate_line: tuple[tuple[float, float], tuple[float, float]] | None = None
+    gate_inside_point: tuple[float, float] | None = None
 
     def is_calibrated(self) -> bool:
         return len(self.reference_points) >= 2
 
     def is_roi_configured(self) -> bool:
         return len(self.roi_polygon) >= 3
+
+    def is_gate_configured(self) -> bool:
+        return self.gate_line is not None and self.gate_inside_point is not None
+
+    @staticmethod
+    def _side(point: tuple[float, float], line: tuple[tuple[float, float], tuple[float, float]]) -> float:
+        """Signed area of (a, b, point) — positive on one side of the line
+        a->b, negative on the other, zero exactly on it."""
+        (ax, ay), (bx, by) = line
+        px, py = point
+        return (bx - ax) * (py - ay) - (by - ay) * (px - ax)
+
+    def crossing(self, prev_point: tuple[float, float], curr_point: tuple[float, float]) -> str | None:
+        """Per-frame foot-point line-crossing test (not a full segment
+        intersection — acceptable at the pipeline's tracked-point cadence):
+        returns "entered" if the point moved from the outside side of the
+        gate line to the inside side between two consecutive frames,
+        "exited" for the reverse, or None if no gate is configured or the
+        point didn't cross."""
+        if not self.is_gate_configured():
+            return None
+
+        inside_sign = self._side(self.gate_inside_point, self.gate_line)
+        if inside_sign == 0:
+            return None  # inside reference point sits on the line itself — misconfigured
+
+        prev_side = self._side(prev_point, self.gate_line)
+        curr_side = self._side(curr_point, self.gate_line)
+        if prev_side == 0 or curr_side == 0:
+            return None  # exactly on the line — wait for a clear frame on either side
+
+        prev_inside = (prev_side > 0) == (inside_sign > 0)
+        curr_inside = (curr_side > 0) == (inside_sign > 0)
+        if prev_inside == curr_inside:
+            return None
+        return "entered" if curr_inside else "exited"
 
     def contains_point(self, point: tuple[float, float]) -> bool:
         """If no ROI has been configured yet, treat the whole frame as the
@@ -109,10 +149,16 @@ class CameraCalibration:
             ],
             "adult_height_ratio": self.adult_height_ratio,
             "child_height_ratio": self.child_height_ratio,
+            "gate_line": [{"x": p[0], "y": p[1]} for p in self.gate_line] if self.gate_line else [],
+            "gate_inside_point": (
+                {"x": self.gate_inside_point[0], "y": self.gate_inside_point[1]} if self.gate_inside_point else None
+            ),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "CameraCalibration":
+        gate_line_raw = data.get("gate_line", [])
+        gate_inside_raw = data.get("gate_inside_point")
         return cls(
             camera_id=data["camera_id"],
             roi_polygon=[(p["x"], p["y"]) for p in data.get("roi", [])],
@@ -121,4 +167,6 @@ class CameraCalibration:
             ],
             adult_height_ratio=data.get("adult_height_ratio", 0.85),
             child_height_ratio=data.get("child_height_ratio", 0.60),
+            gate_line=tuple((p["x"], p["y"]) for p in gate_line_raw) if len(gate_line_raw) == 2 else None,
+            gate_inside_point=(gate_inside_raw["x"], gate_inside_raw["y"]) if gate_inside_raw else None,
         )

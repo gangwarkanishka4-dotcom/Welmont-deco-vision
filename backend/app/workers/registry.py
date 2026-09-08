@@ -47,12 +47,6 @@ class CameraWorkerRegistry:
             await self.remove(camera_id)
 
     # MediaProvider protocol --------------------------------------------
-    async def capture_snapshot(self, camera_id: str, alert_id: str) -> str | None:
-        worker = self._workers.get(camera_id)
-        if worker is None:
-            return None
-        return await worker.capture_snapshot(alert_id, self.settings.snapshot_storage_dir)
-
     async def request_incident_clip(self, camera_id: str, alert_id: str) -> None:
         worker = self._workers.get(camera_id)
         if worker is not None:
