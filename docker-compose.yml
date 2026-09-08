@@ -28,6 +28,11 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-classroom_monitor}
       REDIS_URL: redis://redis:6379/0
+      # RTSP cameras reached over the public internet (not a local LAN) drop
+      # UDP video packets at NAT/firewalls far more often than the initial
+      # TCP control handshake — forcing TCP transport avoids "stream opened"
+      # immediately followed by "frame read failed" in that setup.
+      OPENCV_FFMPEG_CAPTURE_OPTIONS: "rtsp_transport;tcp"
     volumes:
       - ./models:/app/models
       - ./storage:/app/storage
