@@ -14,6 +14,10 @@ frontend/dist/
 .env
 .env.local
 
+# Local Docker override — real CREDENTIAL_ENCRYPTION_KEY/SECRET_KEY and a
+# bind-mount to this machine's dev.db. Machine-specific, never committed.
+docker-compose.override.yml
+
 # Local dev database (SQLite) — contains real encrypted camera credentials
 # and real alert/incident records once the app has actually run
 *.db
@@ -35,6 +39,12 @@ storage/snapshots/*
 # (scripts/extract_crops.py runs from backend/ but writes one level up via
 # ../training_data, so this lands at the repo root, not backend/.)
 /training_data/
+
+# Same reasoning for the ml_pipeline dataset (1_collect_features.py's crops
+# and features.csv, and the trained model) — real classroom photos, never
+# committed. Move this between machines via a direct transfer, not git.
+ml_pipeline/data/
+ml_pipeline/*.pt
 
 # Misc
 .DS_Store

@@ -55,6 +55,10 @@ class CameraCalibration:
     # line, plus a point known to sit on the "inside" (classroom) side.
     gate_line: tuple[tuple[float, float], tuple[float, float]] | None = None
     gate_inside_point: tuple[float, float] | None = None
+    # Fixed "digital zoom" trouble spots (x1, y1, x2, y2) in native frame
+    # coordinates — see app.cv.zoom_pass and Settings.zoom_pass_*. Empty by
+    # default: a camera with no regions configured never runs a zoom pass.
+    zoom_regions: list[tuple[float, float, float, float]] = field(default_factory=list)
 
     def is_calibrated(self) -> bool:
         return len(self.reference_points) >= 2

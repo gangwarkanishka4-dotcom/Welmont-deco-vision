@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Local backend URL override — copy .env.example to .env instead of committing it.
 .env
 
 # Editor directories and files

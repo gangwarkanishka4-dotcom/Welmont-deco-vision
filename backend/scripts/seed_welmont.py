@@ -38,39 +38,59 @@ def _pt(x: float, y: float) -> dict:
 
 # ROI (full classroom, corner-to-corner) and gate line (entrance, with the
 # "inside" side marked) as configured on-site 2026-09-08 via the dashboard's
-# Camera Management -> Configure modal, in each camera's native pixel space
-# (1920x1080). Committed here as the default so a DB reset / reseed restores
-# the real on-site layout instead of coming back up with no ROI/gate at all.
+# Camera Management -> Configure modal, in each camera's true native pixel
+# space (1280x720 — the actual RTSP stream resolution; the ROI editor used
+# to scale clicks against Camera.resolution_width/height, which defaulted to
+# 1920x1080 and was never reconciled against the real stream, so every point
+# below is that original on-site polygon divided by 1.5 to correct for it —
+# see the 2026-09-12 ROI-shift bug investigation). Committed here as the
+# default so a DB reset / reseed restores the real on-site layout instead of
+# coming back up with no ROI/gate at all.
 CAMERAS = [
     {
         "name": "Basement 1",
         "port": 556,
+        # Top edge nudged down at x~600 (2026-09-12): a wall poster up there
+        # (a cartoon figure on an educational display) intermittently scores
+        # just above the detector threshold and gets picked up as a phantom
+        # person — since it's on the wall, not real floor space, excluding
+        # it from the ROI is the correct fix (no confidence threshold can
+        # cleanly separate it from genuine hard-to-detect adults).
         "roi": [
-            _pt(65.25939177101968, 158.64649681528664),
-            _pt(996.0644007155635, 69.21974522292993),
-            _pt(1727.6565295169946, 640.1751592356688),
-            _pt(322.8622540250447, 1070.1114649681529),
+            _pt(240.42933810375672, 135.5732484076433),
+            _pt(599.9284436493739, 175.0),
+            _pt(1197.567084078712, 206.656050955414),
+            _pt(329.73166368515206, 713.4076433121019),
         ],
         "gate_line": [
-            _pt(1408.2289803220037, 478.5191082802548),
-            _pt(1628.0500894454383, 643.6146496815287),
+            _pt(938.8193202146692, 319.0127388535032),
+            _pt(1085.3667262969589, 429.0764331210191),
         ],
-        "gate_inside_point": _pt(1380.7513416815743, 543.8694267515923),
+        "gate_inside_point": _pt(920.5008944454495, 362.5796178343949),
     },
     {
         "name": "Basement 2",
         "port": 553,
+        # Redrawn 2026-09-12 directly against a real 1280x720 frame after
+        # the resolution-mismatch bug above was fixed (the previous points
+        # here were rescaled from the buggy 1920x1080-space save, but were
+        # replaced with a fresh full-room polygon at the user's request).
+        # First attempt cut off the low table/mat area where an adult
+        # regularly sits (confirmed live: her track stayed in_roi=False
+        # continuously, not a momentary edge case) — bottom edge pushed
+        # further down to cover that with margin.
         "roi": [
-            _pt(92.73703041144901, 344.3789808917197),
-            _pt(494.59749552772814, 1049.4745222929937),
-            _pt(1772.3076923076924, 272.1496815286624),
-            _pt(944.5438282647585, 52.02229299363058),
+            _pt(140, 130),
+            _pt(1050, 15),
+            _pt(1170, 250),
+            _pt(990, 660),
+            _pt(160, 660),
         ],
         "gate_line": [
-            _pt(333.1663685152057, 530.1114649681529),
-            _pt(504.9016100178891, 475.0796178343949),
+            _pt(222.1109123434705, 353.4076433121019),
+            _pt(336.60107334525937, 316.71974522292996),
         ],
-        "gate_inside_point": _pt(1126.5831842576029, 678.0095541401274),
+        "gate_inside_point": _pt(751.0554561717353, 452.00636942675163),
     },
 ]
 
@@ -98,6 +118,12 @@ async def main() -> None:
                 rtsp_password_encrypted=encrypt_secret(RTSP_PASSWORD),
                 fps=25,
                 enabled=True,
+                # Must match the true RTSP stream resolution, not the
+                # Camera model's 1920x1080 default — see the ROI comment
+                # above. The ROI editor scales clicks against this field, so
+                # a mismatch here silently reintroduces that bug.
+                resolution_width=1280,
+                resolution_height=720,
             )
             session.add(camera)
             await session.flush()

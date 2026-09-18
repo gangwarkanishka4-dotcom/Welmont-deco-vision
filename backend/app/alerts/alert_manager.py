@@ -50,6 +50,38 @@ class AlertManager:
         self.event_bus.subscribe(EventType.UNSUPERVISED_DETECTED, self._on_unsupervised_detected)
         self.event_bus.subscribe(EventType.SUPERVISION_RESTORED, self._on_supervision_restored)
 
+    async def resolve_stale_active_alerts_on_startup(self) -> int:
+        """Every incident's authoritative lifecycle lives in ClassroomMonitor's
+        in-memory SupervisionStateMachine (see engine.py) — a fresh instance is
+        created on every process start, with no memory of whatever incident
+        was active when the previous process stopped. Any Alert row still
+        ACTIVE at this point can therefore never receive a real
+        SUPERVISION_RESTORED event: the incident_id it's keyed on no longer
+        exists anywhere in memory. Left alone, it stays ACTIVE forever —
+        keeping that classroom's dashboard status stuck UNSUPERVISED
+        regardless of what the room is actually doing (confirmed live
+        2026-09-14: alerts orphaned by restarts as far back as 2026-09-07
+        were still holding a classroom's status hostage). A fresh evaluation
+        of the room's current state will raise a brand new, accurate incident
+        within unsupervised_delay_seconds if it's genuinely still unsupervised
+        — so it's safe to resolve every pre-existing ACTIVE row unconditionally
+        rather than try to guess which ones are "really" still valid."""
+        async with self.session_factory() as session:
+            stale = list(
+                (await session.scalars(select(Alert).where(Alert.status == AlertStatus.ACTIVE.value))).all()
+            )
+            alert_ids = [alert.alert_id for alert in stale]
+
+        for alert_id in alert_ids:
+            await self._resolve(alert_id, reason="stale_on_restart")
+
+        if alert_ids:
+            logger.warning(
+                "Resolved %d stale ACTIVE alert(s) orphaned by a previous process restart: %s",
+                len(alert_ids), ", ".join(alert_ids),
+            )
+        return len(alert_ids)
+
     async def acknowledge(self, alert_id: str) -> Alert | None:
         async with self.session_factory() as session:
             alert = await session.get(Alert, alert_id)

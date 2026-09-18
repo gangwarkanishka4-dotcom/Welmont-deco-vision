@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import { AlertTriangle, X } from 'lucide-react';
 import { useEventSocket } from '../../hooks/useEventSocket.js';
 import { useDirectory } from '../../hooks/useDirectory.js';
-import { useBeepOnce } from '../../hooks/useAlertSound.js';
+import { useAnnounceOnce, useBeepOnce } from '../../hooks/useAlertSound.js';
+import { PrimaryButton, GhostButton } from '../Field.jsx';
 
 const AUTO_DISMISS_MS = 15_000;
 
@@ -12,13 +14,12 @@ export function AlertToastProvider({ children }) {
   const { classroomsById } = useDirectory();
   const navigate = useNavigate();
   const beepOnce = useBeepOnce();
+  const announceOnce = useAnnounceOnce();
 
-  // Local-only by design: dismissing (✕ or the 15s auto-dismiss below) must
+  // Local-only by design: dismissing (X or the 15s auto-dismiss below) must
   // never call acknowledge/resolve — it only hides this transient popup.
-  // The underlying Alert row's status is untouched, and the incident stays
-  // visible on the Dashboard's "ACTIVE ALERT" ribbon and the Alerts page
-  // until the real condition resolves (adult returns) or an operator
-  // explicitly resolves it from AlertDetailView.
+  // The underlying alert stays ACTIVE until the real condition resolves
+  // (adult returns) or someone resolves it from the Incidents page.
   const dismiss = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
@@ -27,6 +28,8 @@ export function AlertToastProvider({ children }) {
     const alert = evt.payload;
     if (alert.severity !== 'HIGH') return;
     beepOnce(); // gated internally on the Settings sound toggle; fires exactly once per event
+    const classroomName = classroomsById.get(alert.classroom_id)?.name ?? alert.classroom_id;
+    announceOnce(`${classroomName} is unsupervised`);
     const id = `${alert.alert_id}-${evt.timestamp}`;
     setToasts((prev) => [...prev, { id, alert, createdAt: Date.now() }]);
     setTimeout(() => dismiss(id), AUTO_DISMISS_MS);
@@ -42,40 +45,46 @@ export function AlertToastProvider({ children }) {
             return (
               <div
                 key={t.id}
-                className="animate-slide-in overflow-hidden rounded-lg border border-red-500/40 bg-surface-850 shadow-lg"
+                className="panel overflow-hidden rounded-xl border shadow-lg"
+                style={{ borderColor: 'var(--bad)' }}
               >
-                <div className="flex items-center justify-between bg-red-600/90 px-4 py-1.5">
-                  <span className="text-xs font-bold uppercase tracking-wide text-white">High Severity Alert</span>
-                  <button onClick={() => dismiss(t.id)} className="text-white/80 hover:text-white" aria-label="Dismiss">
-                    ✕
+                <div
+                  className="flex items-center justify-between px-4 py-2"
+                  style={{ background: 'var(--bad)' }}
+                >
+                  <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-white">
+                    <AlertTriangle size={13} /> High Severity Alert
+                  </span>
+                  <button onClick={() => dismiss(t.id)} aria-label="Dismiss" className="text-white/80 hover:text-white">
+                    <X size={14} />
                   </button>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="text-sm font-semibold text-slate-100">{classroomName}</p>
-                  <p className="mt-0.5 text-sm text-red-300">No supervising adult detected</p>
-                  <p className="mt-1 text-xs text-slate-400">
+                  <p className="text-sm font-semibold">{classroomName}</p>
+                  <p className="mt-0.5 text-sm" style={{ color: 'var(--bad)' }}>No supervising adult detected</p>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--ink-faint)' }}>
                     {t.alert.children_count} child{t.alert.children_count === 1 ? '' : 'ren'} present · started{' '}
                     {new Date(t.alert.started_at).toLocaleTimeString()}
                   </p>
                   <div className="mt-3 flex gap-2">
-                    <button
-                      className="btn-primary flex-1"
+                    <PrimaryButton
+                      className="flex-1"
                       onClick={() => {
-                        navigate(`/live/${t.alert.camera_id}`);
+                        navigate('/live-feed');
                         dismiss(t.id);
                       }}
                     >
                       View Live
-                    </button>
-                    <button
-                      className="btn-secondary flex-1"
+                    </PrimaryButton>
+                    <GhostButton
+                      className="flex-1"
                       onClick={() => {
-                        navigate(`/alerts/${t.alert.alert_id}`);
+                        navigate('/alerts');
                         dismiss(t.id);
                       }}
                     >
-                      View Incident
-                    </button>
+                      View Alert
+                    </GhostButton>
                   </div>
                 </div>
               </div>

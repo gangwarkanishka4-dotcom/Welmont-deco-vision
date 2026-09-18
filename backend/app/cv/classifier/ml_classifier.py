@@ -22,8 +22,13 @@ from app.cv.pose.base import PoseResult
 
 logger = logging.getLogger(__name__)
 
-APPEARANCE_WEIGHT = 0.5
-FALLBACK_WEIGHT = 0.5
+# The appearance model (ml_pipeline/4_train_appearance_model.py) measured
+# 94% adult recall / 92% child recall standalone — well above the heuristic
+# fallback's real-world performance — so it gets most of the weight. The
+# heuristic keeps a small share purely as a sanity check for degenerate
+# crops (extreme lighting, corrupted frames) the CNN wasn't trained on.
+APPEARANCE_WEIGHT = 0.85
+FALLBACK_WEIGHT = 0.15
 
 
 class MLAgeClassifier(AgeGroupClassifier):
@@ -98,7 +103,11 @@ class MLAgeClassifier(AgeGroupClassifier):
             if kind == "onnx":
                 input_name = model.get_inputs()[0].name
                 output = model.run(None, {input_name: tensor.astype(np.float32)})[0]
-                return float(output.reshape(-1)[0])
+                flat = output.reshape(-1)
+                # ml_pipeline/4_train_appearance_model.py exports softmax([P(child), P(adult)]) —
+                # a 2-class array, not a single sigmoid score. Fall back to a single-value
+                # sigmoid-style output (older single-score .onnx contract) if that's what's loaded.
+                return float(flat[1]) if flat.shape[0] >= 2 else float(flat[0])
             else:
                 import torch
 

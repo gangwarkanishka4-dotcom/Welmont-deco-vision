@@ -16,6 +16,16 @@
 Blocking calls (cv2 capture, model inference) are pushed to worker threads via
 asyncio.to_thread so one slow/offline camera never stalls the event loop that
 every other camera and the WebSocket layer share.
+
+Occupancy reconciliation: when a gate line is configured, day-to-day counting
+comes from low-latency crossing events (_inside_ids), not per-frame ROI
+containment. That's fast but stateful, and state built up incrementally can
+drift — a crossing missed to a tracker glitch mis-states occupancy until
+something corrects it, and a fresh (re)connect starts that state at zero even
+if the room is already occupied. Every OCCUPANCY_RECONCILE_INTERVAL_SECONDS
+(and immediately on every (re)connect), _process_frame forces a full
+classify+ROI pass over every currently-tracked person and overwrites
+_inside_ids with that ground truth, bounding how long any drift can persist.
 """
 from __future__ import annotations
 
@@ -39,9 +49,10 @@ from app.cv.calibration.overlay import draw_overlay
 from app.cv.calibration.roi import CameraCalibration
 from app.cv.classifier.base import AgeGroupClassifier
 from app.cv.classifier.rolling_history import AgeLabel, RollingClassificationHistory
-from app.cv.detector.base import PersonDetector
+from app.cv.detector.base import Detection, PersonDetector
 from app.cv.pose.base import PoseEstimator
 from app.cv.tracker.base import PersonTracker
+from app.cv.zoom_pass import run_zoom_pass
 from app.events.event_bus import Event, EventBus
 from app.events.event_types import EventType
 from app.supervision.engine import ClassroomMonitor
@@ -130,6 +141,43 @@ class CameraWorker:
         self._prev_foot: dict[int, tuple[float, float]] = {}
         self._inside_ids: set[int] = set()
 
+        # Adults confirmed "inside" via gate crossing — persists across
+        # frames where that track isn't currently re-detected (occlusion,
+        # tracker glitch), unlike adult_count's usual per-frame computation.
+        # Only cleared by an actual "exited" crossing or the long
+        # adult_presence_timeout_seconds safety net below. See config.py.
+        self._inside_adult_ids: set[int] = set()
+        self._adult_last_confirmed: dict[int, float] = {}
+
+        # None means "never reconciled yet" — the very next frame processed
+        # forces an immediate reconciliation (see _process_frame), so a
+        # (re)connect never starts the room off at a false zero. Reset to
+        # None again on every successful (re)connect in run().
+        self._last_reconcile_at: float | None = None
+
+        # Real bug found live (2026-09-15): reconcile firing on only the
+        # single first frame after a reconnect isn't enough — a confirmed
+        # adult who simply isn't re-detected on that exact frame (RTSP
+        # streams routinely take a frame or two to stabilize right after
+        # reopening) falls out of _inside_ids/_inside_adult_ids and stays
+        # excluded until the next scheduled reconcile (up to
+        # occupancy_reconcile_interval_seconds later) or a genuine gate
+        # crossing — while the persistent-adult adult_count override keeps
+        # reporting 0 the whole time, actively suppressing the correct raw
+        # per-frame classification. A confirmed real adult, correctly
+        # classified every single frame, produced a false "no adult"
+        # alert this exact way. Keeping the ground-truth reconcile active
+        # for a short grace window after every reconnect (not just one
+        # frame) gives detection time to restabilize before the window
+        # closes. Set in run() on every successful (re)connect.
+        self._reconnect_grace_until: float | None = None
+
+        # Periodic digital-zoom pass state (see app.cv.zoom_pass) — only
+        # does anything once calibration.zoom_regions is non-empty.
+        self._zoom_window_started_at: float | None = None
+        self._zoom_pass_frame_counter: int = 0
+        self._zoom_region_index: int = 0
+
     async def run(self) -> None:
         detect_interval = 1.0 / max(1, self.settings.inference_fps)
         last_detect_at = 0.0
@@ -144,6 +192,13 @@ class CameraWorker:
                     consecutive_failures += 1
                     continue
                 consecutive_failures = 0
+                # Force an immediate occupancy reconciliation on the first
+                # frame after a (re)connect — see _last_reconcile_at — and
+                # keep it active for a short grace window afterward too,
+                # since detection can take a frame or two to restabilize
+                # post-reconnect (see _reconnect_grace_until).
+                self._last_reconcile_at = None
+                self._reconnect_grace_until = time.time() + self.settings.reconnect_reconcile_grace_seconds
 
             ok, frame = await asyncio.to_thread(self._cap.read)
             now = time.time()
@@ -151,7 +206,16 @@ class CameraWorker:
             if not ok or frame is None:
                 logger.warning("Camera %s frame read failed", self.camera_id)
                 self._release_capture()
-                if self.monitor.is_stale(now) or True:
+                # Real bug found live (2026-09-15): this check used to be
+                # unconditionally bypassed by a leftover debug tautology,
+                # marking the camera OFFLINE (and flipping the dashboard
+                # badge) on literally every single failed read — even a
+                # one-frame blip on an RTSP-over-internet feed that
+                # reconnects a second later. is_stale() already implements
+                # the intended debounce (only genuinely stale past
+                # camera_offline_timeout_seconds); it just wasn't being
+                # consulted.
+                if self.monitor.is_stale(now):
                     await self.monitor.mark_camera_offline(now)
                 await asyncio.sleep(1.0)
                 continue
@@ -166,12 +230,72 @@ class CameraWorker:
                 self.state.fps = 1.0 / max(now - last_detect_at, 1e-6) if last_detect_at else 0.0
                 last_detect_at = now
 
+    async def _maybe_run_zoom_pass(
+        self, frame: np.ndarray, timestamp: float, existing: list[Detection]
+    ) -> list[Detection]:
+        """See app.cv.zoom_pass. No-op unless this camera has zoom_regions
+        configured. Every zoom_pass_interval_seconds, spends the next
+        zoom_pass_duration_seconds also running the detector on an
+        upscaled crop of one trouble-spot region per eligible frame
+        (alternating frames within that window, not every one — the normal
+        full-frame pass above always runs regardless, so this only adds
+        load, never blocks or slows down base occupancy tracking)."""
+        if not self.calibration.zoom_regions:
+            return []
+
+        if (
+            self._zoom_window_started_at is None
+            or timestamp - self._zoom_window_started_at >= self.settings.zoom_pass_interval_seconds
+        ):
+            self._zoom_window_started_at = timestamp
+
+        in_window = timestamp - self._zoom_window_started_at < self.settings.zoom_pass_duration_seconds
+        self._zoom_pass_frame_counter += 1
+        if not in_window or self._zoom_pass_frame_counter % 2 != 0:
+            return []
+
+        region = self.calibration.zoom_regions[self._zoom_region_index % len(self.calibration.zoom_regions)]
+        self._zoom_region_index += 1
+
+        extra = await asyncio.to_thread(
+            run_zoom_pass, self.detector, frame, region, self.settings.zoom_pass_upscale, existing
+        )
+        if extra:
+            logger.info(
+                "Camera %s: zoom pass on region %s found %d detection(s) the full-frame pass missed",
+                self.camera_id, tuple(round(v) for v in region), len(extra),
+            )
+        return extra
+
     async def _process_frame(self, frame: np.ndarray, timestamp: float) -> None:
         detections = await asyncio.to_thread(self.detector.detect, frame)
+        detections = detections + await self._maybe_run_zoom_pass(frame, timestamp, detections)
         tracks = await asyncio.to_thread(self.tracker.update, detections, timestamp)
 
+        # Periodic occupancy reconciliation: override whatever the gate-
+        # crossing tally currently says with a direct, ground-truth scan of
+        # everyone the tracker currently sees. Crossing events are fast but
+        # can drift (a missed "entered"/"exited" from a tracker glitch
+        # mis-states occupancy indefinitely otherwise); this bounds that
+        # drift to at most one interval, and — since _last_reconcile_at
+        # starts (and resets on reconnect) as None — also fires on the very
+        # first frame, so people already in the room at launch are counted
+        # immediately instead of the crossing tally defaulting to zero.
+        # Also stays active through the post-reconnect grace window (see
+        # _reconnect_grace_until) rather than just the single first frame —
+        # detection can take a frame or two to restabilize after an RTSP
+        # stream reopens, and a confirmed adult who isn't re-detected on
+        # that exact one frame would otherwise fall out of the gate-crossing
+        # tally until the next scheduled reconcile, up to
+        # occupancy_reconcile_interval_seconds later.
+        do_reconcile = (
+            self._last_reconcile_at is None
+            or timestamp - self._last_reconcile_at >= self.settings.occupancy_reconcile_interval_seconds
+            or (self._reconnect_grace_until is not None and timestamp < self._reconnect_grace_until)
+        )
+
         self._frames_since_classify += 1
-        do_classify = self._frames_since_classify >= self.settings.classification_every_n_detect
+        do_classify = self._frames_since_classify >= self.settings.classification_every_n_detect or do_reconcile
         if do_classify:
             self._frames_since_classify = 0
 
@@ -216,9 +340,65 @@ class CameraWorker:
                         await self._publish_gate_event(EventType.PERSON_ENTERED, track, classification, timestamp)
                     elif crossing == "exited":
                         self._inside_ids.discard(track.track_id)
+                        # An actual exit is the one thing that should remove a
+                        # persistently-counted adult immediately, regardless
+                        # of what their classification happens to read on the
+                        # way out (mid-stride poses are noisy).
+                        self._inside_adult_ids.discard(track.track_id)
+                        self._adult_last_confirmed.pop(track.track_id, None)
                         await self._publish_gate_event(EventType.PERSON_EXITED, track, classification, timestamp)
                 self._prev_foot[track.track_id] = foot
+
+                if do_reconcile:
+                    # Ground truth for anyone the tracker currently sees:
+                    # exactly whether they're in the ROI right now, not
+                    # whatever the incremental crossing tally accumulated to.
+                    # A track not present this frame at all (occluded,
+                    # briefly lost) is left untouched — reconciliation only
+                    # corrects people it can actually see this instant.
+                    if in_roi:
+                        self._inside_ids.add(track.track_id)
+                    else:
+                        self._inside_ids.discard(track.track_id)
+
                 counts_toward_occupancy = in_roi and track.track_id in self._inside_ids
+
+                # Persistent adult presence: someone genuinely confirmed
+                # inside (via gate crossing, same requirement as _inside_ids
+                # generally — merely appearing in the ROI without ever
+                # crossing the gate still doesn't count, same as before) who
+                # reads as ADULT stays counted even on frames where they
+                # aren't currently re-detected (occlusion, tracker glitch) —
+                # only an "exited" crossing above, or the long
+                # adult_presence_timeout_seconds safety net in the cleanup
+                # loop below, removes them. This is what stops a momentarily-
+                # occluded teacher from flipping the room to UNSUPERVISED
+                # just because this exact frame didn't re-detect them.
+                #
+                # Real bug found live (2026-09-15, Basement Class 2): a
+                # continuously-detected adult's smoothed_adult_score hovered
+                # right at the 0.75 threshold (0.48-0.85 within ~10s — a bent/
+                # seated pose, not occlusion), so classification.label
+                # flickered ADULT<->UNKNOWN every few frames. The old `else`
+                # branch below discarded her from _inside_adult_ids on every
+                # single UNKNOWN frame, instantly zeroing adult_count and
+                # firing repeated real false UNSUPERVISED alerts even though
+                # she never left the room. Only a confident *opposite* signal
+                # (CHILD) should clear persisted-adult status immediately —
+                # that protects against a recycled track ID landing on a
+                # genuinely different, smaller person (see
+                # test_reclassified_as_child_is_not_persisted_as_adult).
+                # UNKNOWN is "not sure", not "not an adult", so it leaves her
+                # persisted status untouched and lets the long safety-net
+                # timeout be the only thing that can evict a merely-noisy
+                # classification.
+                if track.track_id in self._inside_ids:
+                    if classification.label == AgeLabel.ADULT:
+                        self._inside_adult_ids.add(track.track_id)
+                        self._adult_last_confirmed[track.track_id] = timestamp
+                    elif classification.label == AgeLabel.CHILD:
+                        self._inside_adult_ids.discard(track.track_id)
+                        self._adult_last_confirmed.pop(track.track_id, None)
 
             if counts_toward_occupancy:
                 if classification.label == AgeLabel.ADULT:
@@ -248,11 +428,77 @@ class CameraWorker:
             if last_seen is not None and timestamp - last_seen > self.settings.track_timeout_seconds:
                 self.history.forget(stale_id)
                 self._track_last_seen.pop(stale_id, None)
+                if stale_id in self._inside_adult_ids:
+                    # This track is a confirmed-inside adult riding out an
+                    # occlusion gap longer than track_timeout_seconds (tuned
+                    # for classifier bookkeeping, a couple of seconds — far
+                    # shorter than a real occlusion). Leave _inside_ids/
+                    # _prev_foot alone so that if the tracker keeps the same
+                    # ID once they're re-detected, the crossing check above
+                    # still sees them as "already inside" instead of reading
+                    # their reappearance as never having entered. They still
+                    # get evicted by the long adult_presence_timeout_seconds
+                    # safety net below if this drags on too long.
+                    continue
                 # A track that vanished without a matching "exited" gate
                 # crossing (tracker lost it, camera glitch, ...) must not
                 # permanently inflate the occupancy count.
                 self._inside_ids.discard(stale_id)
                 self._prev_foot.pop(stale_id, None)
+
+        # Safety net for a presumed-still-inside adult who left without a
+        # clean "exited" gate crossing (camera glitch, walked out somewhere
+        # the gate line doesn't cover): bounds how long they can stay
+        # phantom-counted, without requiring the frequent re-detection the
+        # main loop above deliberately no longer demands.
+        for adult_id in list(self._inside_adult_ids):
+            last_confirmed = self._adult_last_confirmed.get(adult_id)
+            if last_confirmed is not None and timestamp - last_confirmed > self.settings.adult_presence_timeout_seconds:
+                self._inside_adult_ids.discard(adult_id)
+                self._adult_last_confirmed.pop(adult_id, None)
+                # Also drop the general _inside_ids entry: once this track has
+                # aged out of classification history (the short stale-purge
+                # above only spares it while it's still in _inside_adult_ids),
+                # nothing else will ever clean this up otherwise, and there's
+                # no reason to keep treating them as "inside" for any purpose
+                # once we've given up on them here.
+                self._inside_ids.discard(adult_id)
+                self._prev_foot.pop(adult_id, None)
+                logger.info(
+                    "Camera %s: track %d dropped from persistent adult presence "
+                    "(unconfirmed for over %.0fs — presumed left without a clean exit crossing)",
+                    self.camera_id, adult_id, self.settings.adult_presence_timeout_seconds,
+                )
+
+        # Once a gate is configured, adult_count reflects who's persistently
+        # inside (see above) rather than only who this exact frame
+        # re-detected — the entire point of this feature. Cameras without a
+        # gate line keep the plain per-frame count computed in the loop.
+        if self.calibration.is_gate_configured():
+            adult_count = len(self._inside_adult_ids)
+            # Real bug found live (2026-09-16): in a busy room, ByteTrack
+            # occasionally re-issues a new track ID for the same physical
+            # adult (occlusion, a bent-over pose, motion blur). Each new ID
+            # gets its own independent 60s grace period once it reads ADULT,
+            # so several IDs that all belong to the same one or two real
+            # adults can be "persistently inside" at once — live logs showed
+            # 9 distinct track IDs read ADULT for one camera within 3
+            # minutes, inflating adult_count to 5 in a room with 1-2 real
+            # adults. There's no cross-track re-identification here, so the
+            # honest bound is: persistent adults can never outnumber the
+            # people this exact frame can actually see. Only applied when
+            # the tracker sees *someone* — an empty `tracks` list is a
+            # detector/frame gap, not evidence the room emptied, and must
+            # not zero out a real persisted adult riding out that gap.
+            if tracks:
+                adult_count = min(adult_count, len(tracks))
+
+        if do_reconcile:
+            self._last_reconcile_at = timestamp
+            logger.info(
+                "Camera %s occupancy reconciled: adult=%d child=%d unknown=%d (%d tracked)",
+                self.camera_id, adult_count, child_count, unknown_count, len(tracks),
+            )
 
         # Child-first gating (spec): with no child/unknown present, adult
         # presence is neither counted nor alerted on — the classroom is
@@ -334,9 +580,7 @@ class CameraWorker:
             {"box": p.box, "label": p.label, "confidence": p.confidence, "track_id": p.track_id, "in_roi": p.in_roi}
             for p in self.state.people
         ]
-        canvas = draw_overlay(
-            self.latest_frame, self.classroom_name, self.state.supervision_state, people_dicts, self.calibration.roi_polygon
-        )
+        canvas = draw_overlay(self.latest_frame, self.classroom_name, self.state.supervision_state, people_dicts)
         ok, buf = cv2.imencode(".jpg", canvas)
         return buf.tobytes() if ok else None
 

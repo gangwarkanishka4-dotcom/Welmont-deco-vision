@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import cv2
+import imageio_ffmpeg
+import numpy as np
 
 from app.database import AsyncSessionLocal
 from app.models.alert import Alert
@@ -18,6 +20,43 @@ from app.models.video_clip import VideoClip
 from app.video.ring_buffer import RingBuffer
 
 logger = logging.getLogger(__name__)
+
+
+def _encode_h264(frames: list[np.ndarray], fps: int, file_path: Path) -> None:
+    """Encode raw BGR frames straight to H.264/yuv420p via ffmpeg.
+
+    Real bug found live (2026-09-15): this used to go through
+    cv2.VideoWriter with fourcc "mp4v", which — absent the (unlicensed,
+    not installed) OpenH264 DLL this machine's OpenCV/FFmpeg build needs
+    for real H.264 — silently falls back to the old MPEG-4 Part 2 codec
+    ("FMP4"). That file is a perfectly valid, OpenCV-readable video, which
+    is exactly why the bug went unnoticed here — it just isn't a codec any
+    browser's native <video> element can decode, so every incident clip
+    loaded as a blank/broken player on the dashboard. `imageio-ffmpeg`
+    bundles a static ffmpeg binary with libx264 built in, sidestepping the
+    missing system codec entirely — no separate ffmpeg install needed.
+    `-pix_fmt yuv420p` (browsers can't reliably decode libx264's default
+    yuv444p) and `-movflags +faststart` (moves the moov atom to the front
+    so playback can start before the whole file downloads) are both
+    required for this to actually play in a browser, not just exist."""
+    height, width = frames[0].shape[:2]
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    cmd = [
+        ffmpeg_exe, "-y", "-loglevel", "error",
+        "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{width}x{height}", "-r", str(fps),
+        "-i", "-",
+        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        str(file_path),
+    ]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    assert proc.stdin is not None
+    for frame in frames:
+        proc.stdin.write(frame.tobytes())
+    proc.stdin.close()
+    proc.wait()
+    if proc.returncode != 0:
+        stderr = proc.stderr.read().decode(errors="replace") if proc.stderr else ""
+        raise RuntimeError(f"ffmpeg encode failed (exit {proc.returncode}): {stderr[-2000:]}")
 
 
 class ClipWriter:
@@ -46,13 +85,8 @@ class ClipWriter:
                 return
 
             file_path = self.storage_dir / f"{alert_id}.mp4"
-            height, width = frames[0].frame.shape[:2]
-            writer = cv2.VideoWriter(str(file_path), cv2.VideoWriter_fourcc(*"mp4v"), self.fps, (width, height))
-            try:
-                for buffered in frames:
-                    writer.write(buffered.frame)
-            finally:
-                writer.release()
+            raw_frames = [buffered.frame for buffered in frames]
+            await asyncio.to_thread(_encode_h264, raw_frames, self.fps, file_path)
 
             started_at = datetime.fromtimestamp(frames[0].timestamp, tz=timezone.utc)
             ended_at = datetime.fromtimestamp(frames[-1].timestamp, tz=timezone.utc)

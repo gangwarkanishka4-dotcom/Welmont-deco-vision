@@ -96,3 +96,46 @@ async def test_resolve_clears_buzzer_and_new_incident_creates_new_alert(session_
         all_alerts = (await session.scalars(select(Alert))).all()
     assert len(all_alerts) == 2
     assert len(buzzer.active_alerts) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_resolves_alerts_orphaned_by_a_previous_process_restart(session_factory, seeded_camera):
+    # A restart wipes ClassroomMonitor's in-memory SupervisionStateMachine, so
+    # whatever incident was ACTIVE when the previous process stopped can never
+    # receive a real SUPERVISION_RESTORED event again — its incident_id no
+    # longer exists anywhere. Simulate that: an ACTIVE alert with no matching
+    # in-memory incident, as if written by a process that's already gone.
+    camera_id, classroom_id = seeded_camera
+    bus = EventBus()
+    buzzer = MockBuzzer()
+    manager = AlertManager(event_bus=bus, session_factory=session_factory, alert_output=buzzer, settings=get_settings())
+    manager.register()
+
+    await bus.publish(Event(EventType.UNSUPERVISED_DETECTED, {
+        "camera_id": camera_id, "classroom_id": classroom_id, "incident_id": "INC-orphan", "children_count": 3, "adult_count": 0,
+    }))
+    async with session_factory() as session:
+        orphan = await session.scalar(select(Alert).where(Alert.incident_id == "INC-orphan"))
+    assert orphan.status == "ACTIVE"
+
+    # A brand new AlertManager instance, as a fresh process restart would create.
+    fresh_bus = EventBus()
+    fresh_buzzer = MockBuzzer()
+    fresh_manager = AlertManager(event_bus=fresh_bus, session_factory=session_factory, alert_output=fresh_buzzer, settings=get_settings())
+    fresh_manager.register()
+
+    resolved_count = await fresh_manager.resolve_stale_active_alerts_on_startup()
+    assert resolved_count == 1
+
+    async with session_factory() as session:
+        after = await session.scalar(select(Alert).where(Alert.incident_id == "INC-orphan"))
+    assert after.status == "RESOLVED"
+    assert after.resolved_at is not None
+
+    # A genuinely still-unsupervised room raises a fresh incident normally afterward.
+    await fresh_bus.publish(Event(EventType.UNSUPERVISED_DETECTED, {
+        "camera_id": camera_id, "classroom_id": classroom_id, "incident_id": "INC-fresh", "children_count": 3, "adult_count": 0,
+    }))
+    async with session_factory() as session:
+        fresh_alert = await session.scalar(select(Alert).where(Alert.incident_id == "INC-fresh"))
+    assert fresh_alert.status == "ACTIVE"

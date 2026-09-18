@@ -39,10 +39,19 @@ def build_classifier(settings: Settings) -> AgeGroupClassifier:
     if settings.age_model:
         from app.cv.classifier.ml_classifier import MLAgeClassifier
 
-        logger.info("Using trained age-group model: %s", settings.age_model)
-        return MLAgeClassifier(model_path=settings.age_model, device=settings.device)
+        # Appearance-based (image) model — trained on what a person actually looks
+        # like, not pose geometry. Confirmed 94% adult recall vs. the geometry
+        # model's 85%, so this now takes priority when configured.
+        logger.info("Using trained appearance (image) model: %s", settings.age_model)
+        return MLAgeClassifier(model_path=settings.age_model, device=settings.device, input_size=160)
 
-    logger.info("No AGE_MODEL configured — using heuristic geometry/pose classifier fallback")
+    if settings.trained_feature_classifier_path:
+        from app.cv.classifier.trained_feature_classifier import TrainedFeatureClassifier
+
+        logger.info("Using trained feature classifier: %s", settings.trained_feature_classifier_path)
+        return TrainedFeatureClassifier(model_path=settings.trained_feature_classifier_path)
+
+    logger.info("No trained classifier configured — using heuristic geometry/pose classifier fallback")
     return HeuristicAgeClassifier()
 
 

@@ -1,13 +1,25 @@
 """Draws the debug/snapshot overlay: bounding boxes (adults only — see below)
-with smoothed confidence, ROI polygon, and a status banner. Shared by the
-live-view MJPEG/WS stream, the debug overlay, and alert snapshots — no facial
-identity information is ever drawn, only track_id + age-group label (spec §12/§26).
+with smoothed confidence, and a status banner. Shared by the live-view
+MJPEG/WS stream, the debug overlay, and alert snapshots — no facial identity
+information is ever drawn, only track_id + age-group label (spec §12/§26).
 
-Only ADULT-labeled people get a drawn box (2026-09-08): children are still
-fully detected, classified, and counted upstream in the pipeline exactly as
-before — this function is purely the visual render and has no bearing on
-adult_count/child_count or supervision state. It just never draws a box or
-label on a child in the rendered image."""
+Only ADULT-labeled people *inside the ROI* get a drawn box (2026-09-08/09):
+children are still fully detected, classified, and counted upstream in the
+pipeline exactly as before — this function is purely the visual render and
+has no bearing on adult_count/child_count or supervision state. It just
+never draws a box or label on a child, or on anyone outside the ROI (who
+isn't counted toward adult_count either, so drawing them would falsely
+imply a supervising adult who isn't actually affecting the room's status).
+
+Deliberately does NOT draw the ROI polygon itself (2026-09-15) — that outline
+is only relevant while actually configuring it, which the Camera
+Configuration screen already draws client-side, on its own canvas, straight
+from the same ROI data this function never touches. Burning it into the live
+feed/snapshots as well showed it to every viewer permanently, not just
+whoever's editing it. Recorded incident clips were never affected either
+way — they're written from the raw pre-overlay frame (see
+CameraWorker.ring_buffer.push in pipeline.py), never from this function's
+output."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -29,16 +41,8 @@ def draw_overlay(
     classroom_name: str,
     state: str,
     people: list[dict],  # [{"box": (x1,y1,x2,y2), "label": "ADULT", "confidence": 0.94, "track_id": 17, "in_roi": True}]
-    roi_polygon: list[tuple[float, float]] | None = None,
 ) -> np.ndarray:
     canvas = frame.copy()
-
-    if roi_polygon and len(roi_polygon) >= 3:
-        pts = np.array(roi_polygon, dtype=np.int32).reshape((-1, 1, 2))
-        overlay = canvas.copy()
-        cv2.fillPoly(overlay, [pts], (255, 255, 255))
-        cv2.addWeighted(overlay, 0.08, canvas, 0.92, 0, canvas)
-        cv2.polylines(canvas, [pts], isClosed=True, color=(255, 255, 255), thickness=2)
 
     for person in people:
         # Only adults get a drawn box — children's boxes/labels are never
@@ -49,11 +53,19 @@ def draw_overlay(
         # ever called). Per request 2026-09-08: no visual boxes on children.
         if person["label"] != "ADULT":
             continue
+        # An ADULT outside the ROI doesn't count toward adult_count either
+        # (pipeline.py only counts in_roi detections) — drawing a full box
+        # for them anyway falsely implies a counted supervising adult who
+        # isn't actually affecting the room's status. Real footage
+        # 2026-09-09: a confidently-ADULT, out-of-ROI detection (someone at
+        # a doorway/hallway edge) drew a full box while genuinely not
+        # supervising the room.
+        if not person.get("in_roi", True):
+            continue
 
         x1, y1, x2, y2 = (int(v) for v in person["box"])
         color = LABEL_COLORS.get(person["label"], (200, 200, 200))
-        thickness = 2 if person.get("in_roi", True) else 1
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, thickness)
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
         text = f"{person['label']} {person['confidence']*100:.0f}%  #{person['track_id']}"
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
         cv2.rectangle(canvas, (x1, max(0, y1 - th - 8)), (x1 + tw + 6, y1), color, -1)

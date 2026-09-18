@@ -1,16 +1,17 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { EventSocketProvider } from './websocket/EventSocketProvider.jsx';
 import { DirectoryProvider } from './context/DirectoryProvider.jsx';
 import { AlertToastProvider } from './components/toast/AlertToastProvider.jsx';
-import { AppLayout } from './components/layout/AppLayout.jsx';
-import { DashboardPage } from './pages/DashboardPage.jsx';
-import { CamerasPage } from './pages/CamerasPage.jsx';
-import { LiveMonitoringIndexPage } from './pages/LiveMonitoringIndexPage.jsx';
-import { LiveMonitoringPage } from './pages/LiveMonitoringPage.jsx';
-import { AlertsPage } from './pages/AlertsPage.jsx';
-import { AnalyticsPage } from './pages/AnalyticsPage.jsx';
-import { UserAccessPage } from './pages/UserAccessPage.jsx';
-import { SettingsPage } from './pages/SettingsPage.jsx';
+import Layout from './components/Layout';
+import Dashboard from './pages/Dashboard';
+import LiveFeed from './pages/LiveFeed';
+import Alerts from './pages/Alerts';
+import Incidents from './pages/Incidents';
+import SiteManagement from './pages/SiteManagement';
+import CameraManagement from './pages/CameraManagement';
+import UserManagement from './pages/UserManagement';
+import Reports from './pages/Reports';
+import Settings from './pages/Settings';
 
 export default function App() {
   return (
@@ -18,19 +19,19 @@ export default function App() {
       <EventSocketProvider>
         <DirectoryProvider>
           <AlertToastProvider>
-            <Routes>
-              <Route element={<AppLayout />}>
-                <Route index element={<DashboardPage />} />
-                <Route path="cameras" element={<CamerasPage />} />
-                <Route path="live" element={<LiveMonitoringIndexPage />} />
-                <Route path="live/:cameraId" element={<LiveMonitoringPage />} />
-                <Route path="alerts" element={<AlertsPage />} />
-                <Route path="alerts/:alertId" element={<AlertsPage />} />
-                <Route path="analytics" element={<AnalyticsPage />} />
-                <Route path="user-access" element={<UserAccessPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-              </Route>
-            </Routes>
+            <Layout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/live-feed" element={<LiveFeed />} />
+                <Route path="/alerts" element={<Alerts />} />
+                <Route path="/alerts/incidents" element={<Incidents />} />
+                <Route path="/sites" element={<SiteManagement />} />
+                <Route path="/cameras" element={<CameraManagement />} />
+                <Route path="/users" element={<UserManagement />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </Layout>
           </AlertToastProvider>
         </DirectoryProvider>
       </EventSocketProvider>

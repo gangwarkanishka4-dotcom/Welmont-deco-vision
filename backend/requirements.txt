@@ -21,6 +21,18 @@ opencv-python-headless==4.10.0.84
 numpy==1.26.4
 ultralytics==8.3.49
 supervision==0.25.1
+# Pinned older build: on at least one deployment machine, a local Application
+# Control / code-integrity policy blocks scipy's newer compiled extensions
+# (supervision depends on scipy.interpolate for ByteTrack). This version is
+# confirmed to load; if you hit "DLL load failed ... Application Control
+# policy has blocked this file" on a fresh install, that's this issue.
+scipy==1.13.1
+# Incident clips need real H.264 to play in a browser — the system OpenCV
+# build's own FFmpeg backend needs an OpenH264 DLL for that which usually
+# isn't installed, silently falling back to a browser-incompatible codec
+# (see app.video.clip_writer). imageio-ffmpeg bundles a static ffmpeg binary
+# with libx264 built in, so this sidesteps that entirely.
+imageio-ffmpeg==0.6.0
 # torch/torchvision are large — install the CPU or CUDA build matching your
 # hardware separately, see README "How to run with GPU". Listed here so
 # `pip install -r requirements.txt` still pulls a working CPU default.

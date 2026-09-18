@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
         media_provider=registry,
     )
     alert_manager.register()
+    await alert_manager.resolve_stale_active_alerts_on_startup()
 
     from app.workers.camera_status_sync import CameraStatusSync
 
@@ -95,7 +96,7 @@ async def lifespan(app: FastAPI):
             )
     logger.info("Started %d camera worker(s)", len(registry.all()))
 
-    retention_task = asyncio.create_task(retention_loop(AsyncSessionLocal))
+    retention_task = asyncio.create_task(retention_loop(AsyncSessionLocal, settings.video_retention_days))
 
     yield
 

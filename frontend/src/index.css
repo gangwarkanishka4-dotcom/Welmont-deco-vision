@@ -1,107 +1,64 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
-/* Design tokens for the enterprise security-monitoring dark theme. Tailwind v4 auto-generates
-   bg-, text-, and border- utilities from these --color- tokens, so no tailwind.config.js is needed. */
-@theme {
-  --color-surface-950: #0a0d12;
-  --color-surface-900: #0f1319;
-  --color-surface-850: #131822;
-  --color-surface-800: #161c28;
-  --color-surface-700: #1e2635;
-  --color-surface-600: #2a3446;
-  --color-surface-500: #3d4a61;
-
-  --color-accent-400: #4d9fff;
-  --color-accent-500: #2f7fff;
-  --color-accent-600: #1c63e0;
-
-  --color-status-supervised: #22c55e;
-  --color-status-waiting: #f59e0b;
-  --color-status-unsupervised: #ef4444;
-  --color-status-empty: #64748b;
-
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-
-  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 1px 3px rgba(0, 0, 0, 0.4);
-
-  --animate-pulse-ring: pulseRing 1.6s ease-in-out infinite;
-  --animate-slide-in: slideIn 0.2s ease-out;
+:root {
+  --ink: #252525;
+  --ink-soft: #53535d;
+  --ink-faint: #70707d;
+  --line: #e6e6ea;
+  --surface: #f7f7f9;
+  --panel: #ffffff;
+  --brand: #2451e0;
+  --brand-dark: #17348c;
+  --brand-bg: #eaf0fe;
+  --good: #1a9d5c;
+  --good-bg: #e8f7ef;
+  --bad: #d3402e;
+  --bad-bg: #fdeceb;
+  --warn: #b4790c;
+  --warn-bg: #fdf3e0;
+  --violet: #7c4fd6;
+  --violet-bg: #f2ecfc;
+  --neutral-bg: #eef0f3;
+  --brand-glow: rgba(36, 81, 224, 0.32);
 }
 
-@keyframes pulseRing {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-@keyframes slideIn {
-  0% {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-  100% {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
+* { box-sizing: border-box; }
 
 body {
-  font-feature-settings: "tnum" 1;
-  background-color: var(--color-surface-950);
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background-color: var(--color-surface-600);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #34364a; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 
-/* Tailwind v4 only allows @apply of real utilities (not arbitrary @layer components classes),
-   so the shared button base is declared via @utility to make "btn" itself an applyable utility
-   that the btn-* variants below can compose. */
-@utility btn {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-md text-sm font-medium px-3 py-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
-}
+button { font-family: inherit; cursor: pointer; }
+input, select, textarea { font-family: inherit; }
+a { color: inherit; }
 
-@layer components {
-  .panel {
-    @apply bg-surface-850 border border-surface-700 rounded-lg shadow-panel;
+/* Every "card surface" in the app used to be Tailwind's literal bg-white —
+   this class replaces that so cards follow the theme instead of always
+   rendering white regardless of the page's palette. */
+.panel { background: var(--panel); }
+
+/* Lifts and glows on hover — used on the Dashboard's KPI cards, Sites
+   panel rows, and Recent alerts panel rows. */
+.hover-glow {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.hover-glow:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px -6px var(--brand-glow), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hover-glow {
+    transition: box-shadow 0.18s ease;
   }
-  .btn-primary {
-    @apply btn bg-accent-500 hover:bg-accent-600 text-white;
-  }
-  .btn-secondary {
-    @apply btn bg-surface-700 hover:bg-surface-600 text-slate-100 border border-surface-600;
-  }
-  .btn-danger {
-    @apply btn bg-red-600/90 hover:bg-red-600 text-white;
-  }
-  .btn-ghost {
-    @apply btn bg-transparent hover:bg-surface-700 text-slate-300;
-  }
-  .input {
-    @apply bg-surface-900 border border-surface-600 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-accent-500/60 focus:border-accent-500;
-  }
-  .label {
-    @apply block text-xs font-medium text-slate-400 mb-1;
+  .hover-glow:hover {
+    transform: none;
   }
 }

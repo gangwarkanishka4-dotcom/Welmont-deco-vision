@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Modal } from '../Modal.jsx';
-import { Spinner } from '../Spinner.jsx';
+import Modal from '../Modal.jsx';
+import { Field, TextInput, Select, PrimaryButton, GhostButton } from '../Field.jsx';
 import { api } from '../../services/api.js';
 import { useDirectory } from '../../hooks/useDirectory.js';
 
@@ -28,7 +28,7 @@ function formFromCamera(camera) {
     rtsp_port: String(camera.rtsp_port),
     rtsp_path: camera.rtsp_path,
     rtsp_username: camera.rtsp_username,
-    rtsp_password: '', // write-only — never pre-filled, and only sent onward if the admin types a new one
+    rtsp_password: '', // write-only — never pre-filled, only sent if the admin types a new one
     fps: String(camera.fps),
     resolution_width: String(camera.resolution_width),
     resolution_height: String(camera.resolution_height),
@@ -36,7 +36,7 @@ function formFromCamera(camera) {
   };
 }
 
-export function CameraFormModal({ open, onClose, camera, onSaved }) {
+export default function CameraFormModal({ open, onClose, camera, onSaved }) {
   const { classrooms, refetchClassrooms } = useDirectory();
   const [form, setForm] = useState(() => (camera ? formFromCamera(camera) : emptyForm(classrooms)));
   const [saving, setSaving] = useState(false);
@@ -47,7 +47,7 @@ export function CameraFormModal({ open, onClose, camera, onSaved }) {
   const [newClassroomLocation, setNewClassroomLocation] = useState('');
   const [creatingClassroom, setCreatingClassroom] = useState(false);
 
-  // Re-seed the form whenever a different camera is opened (or the modal reopens for "add new").
+  // Re-seed the form whenever a different camera is opened (or reopened for "add new").
   const [lastCameraId, setLastCameraId] = useState(undefined);
   if (open && camera?.id !== lastCameraId) {
     setLastCameraId(camera?.id ?? null);
@@ -77,7 +77,7 @@ export function CameraFormModal({ open, onClose, camera, onSaved }) {
   const submit = async () => {
     setError(null);
     if (!form.name.trim() || !form.classroom_id || !form.rtsp_host.trim()) {
-      setError('Camera name, classroom, and RTSP host are required.');
+      setError('Camera name, site, and RTSP host are required.');
       return;
     }
     setSaving(true);
@@ -110,138 +110,72 @@ export function CameraFormModal({ open, onClose, camera, onSaved }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={camera ? 'Edit Camera' : 'Add Camera'} widthClassName="max-w-2xl">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
-          <label className="label">Camera Name</label>
-          <input className="input w-full" value={form.name} onChange={(e) => set('name', e.target.value)} />
-        </div>
+    <Modal open={open} onClose={onClose} title={camera ? 'Edit camera' : 'Add camera'} subtitle="Connect RTSP feed to site" width={420}>
+      <Field label="Camera name">
+        <TextInput placeholder="eg. Basement Class 1" value={form.name} onChange={(e) => set('name', e.target.value)} />
+      </Field>
 
-        <div className="col-span-2">
-          <label className="label">Classroom</label>
-          {!addingClassroom ? (
+      <Field label="Site">
+        {!addingClassroom ? (
+          <div className="flex gap-2">
+            <Select value={form.classroom_id} onChange={(e) => set('classroom_id', e.target.value)}>
+              {classrooms.length === 0 && <option value="">No sites yet</option>}
+              {classrooms.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+            <GhostButton className="shrink-0" onClick={() => setAddingClassroom(true)}>+ New</GhostButton>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 rounded-lg border p-3" style={{ borderColor: 'var(--line)' }}>
+            <TextInput placeholder="Site name" value={newClassroomName} onChange={(e) => setNewClassroomName(e.target.value)} />
+            <TextInput placeholder="Location" value={newClassroomLocation} onChange={(e) => setNewClassroomLocation(e.target.value)} />
             <div className="flex gap-2">
-              <select
-                className="input w-full"
-                value={form.classroom_id}
-                onChange={(e) => set('classroom_id', e.target.value)}
-              >
-                {classrooms.length === 0 && <option value="">No classrooms yet</option>}
-                {classrooms.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <button className="btn-secondary shrink-0" onClick={() => setAddingClassroom(true)}>
-                + New Classroom
-              </button>
+              <PrimaryButton onClick={createClassroom} disabled={creatingClassroom}>Create</PrimaryButton>
+              <GhostButton onClick={() => setAddingClassroom(false)}>Cancel</GhostButton>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2 rounded-md border border-surface-600 p-3">
-              <input
-                className="input w-full"
-                placeholder="Classroom name"
-                value={newClassroomName}
-                onChange={(e) => setNewClassroomName(e.target.value)}
-              />
-              <input
-                className="input w-full"
-                placeholder="Location (e.g. Building A, Floor 2)"
-                value={newClassroomLocation}
-                onChange={(e) => setNewClassroomLocation(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <button className="btn-primary" disabled={creatingClassroom} onClick={createClassroom}>
-                  {creatingClassroom ? <Spinner /> : 'Create'}
-                </button>
-                <button className="btn-ghost" onClick={() => setAddingClassroom(false)}>
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+      </Field>
 
-        <div className="col-span-2">
-          <label className="label">RTSP Host</label>
-          <input
-            className="input w-full"
-            value={form.rtsp_host}
-            onChange={(e) => set('rtsp_host', e.target.value)}
-            placeholder="192.168.1.50"
-          />
-        </div>
-        <div>
-          <label className="label">RTSP Port</label>
-          <input className="input w-full" value={form.rtsp_port} onChange={(e) => set('rtsp_port', e.target.value)} />
-        </div>
-        <div>
-          <label className="label">RTSP Path</label>
-          <input
-            className="input w-full"
-            value={form.rtsp_path}
-            onChange={(e) => set('rtsp_path', e.target.value)}
-            placeholder="/stream1"
-          />
-        </div>
-        <div>
-          <label className="label">Username</label>
-          <input
-            className="input w-full"
-            value={form.rtsp_username}
-            onChange={(e) => set('rtsp_username', e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">
-            Password {camera && <span className="text-slate-600">(leave blank to keep current)</span>}
-          </label>
-          <input
-            type="password"
-            className="input w-full"
-            value={form.rtsp_password}
-            onChange={(e) => set('rtsp_password', e.target.value)}
-            autoComplete="new-password"
-          />
-        </div>
-        <div>
-          <label className="label">FPS</label>
-          <input className="input w-full" value={form.fps} onChange={(e) => set('fps', e.target.value)} />
-        </div>
-        <div className="flex items-end gap-2">
-          <label className="flex items-center gap-2 pb-1.5 text-sm text-slate-300">
+      <Field label="RTSP host">
+        <TextInput placeholder="192.168.1.50" value={form.rtsp_host} onChange={(e) => set('rtsp_host', e.target.value)} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="RTSP port">
+          <TextInput value={form.rtsp_port} onChange={(e) => set('rtsp_port', e.target.value)} />
+        </Field>
+        <Field label="RTSP path">
+          <TextInput placeholder="/stream1" value={form.rtsp_path} onChange={(e) => set('rtsp_path', e.target.value)} />
+        </Field>
+        <Field label="Username">
+          <TextInput value={form.rtsp_username} onChange={(e) => set('rtsp_username', e.target.value)} />
+        </Field>
+        <Field label={camera ? 'Password (leave blank to keep current)' : 'Password'}>
+          <TextInput type="password" autoComplete="new-password" value={form.rtsp_password} onChange={(e) => set('rtsp_password', e.target.value)} />
+        </Field>
+        <Field label="FPS">
+          <TextInput value={form.fps} onChange={(e) => set('fps', e.target.value)} />
+        </Field>
+        <Field label="Enabled">
+          <label className="flex items-center gap-2 text-sm h-[38px]">
             <input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} />
-            Enabled
+            Camera active
           </label>
-        </div>
-        <div>
-          <label className="label">Resolution Width</label>
-          <input
-            className="input w-full"
-            value={form.resolution_width}
-            onChange={(e) => set('resolution_width', e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">Resolution Height</label>
-          <input
-            className="input w-full"
-            value={form.resolution_height}
-            onChange={(e) => set('resolution_height', e.target.value)}
-          />
-        </div>
+        </Field>
+        <Field label="Resolution width">
+          <TextInput value={form.resolution_width} onChange={(e) => set('resolution_width', e.target.value)} />
+        </Field>
+        <Field label="Resolution height">
+          <TextInput value={form.resolution_height} onChange={(e) => set('resolution_height', e.target.value)} />
+        </Field>
       </div>
 
-      {error && <p className="mt-3 text-sm text-status-unsupervised">{error}</p>}
+      {error && <p className="text-sm mb-3" style={{ color: 'var(--bad)' }}>{error}</p>}
 
-      <div className="mt-5 flex justify-end gap-2">
-        <button className="btn-secondary" onClick={onClose}>
-          Cancel
-        </button>
-        <button className="btn-primary" disabled={saving} onClick={submit}>
-          {saving ? <Spinner /> : camera ? 'Save Changes' : 'Add Camera'}
-        </button>
+      <div className="flex justify-end gap-2">
+        <GhostButton onClick={onClose}>Cancel</GhostButton>
+        <PrimaryButton onClick={submit} disabled={saving}>{camera ? 'Save changes' : 'Add'}</PrimaryButton>
       </div>
     </Modal>
   );
