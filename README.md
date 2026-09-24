@@ -1,4 +1,4 @@
-# Classroom Supervision & Intrusion Detection System
+# Classroom Supervision 
 
 A real-time computer-vision system that watches classroom camera feeds,
 detects whether a supervising adult is present whenever children are in the
